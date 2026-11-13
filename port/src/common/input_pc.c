@@ -83,6 +83,7 @@
 #include <windows.h>
 #else
 #include <time.h>
+#include <unistd.h>
 #endif
 #include <dolphin/os.h>
 #include "port/platform.h"
@@ -1012,6 +1013,62 @@ static void applyPress(PADStatus* pad, int port) {
 /* $TTYD_AC_CUE_PRESS=1 (tests of the Action Command cue): A pressed for two
  * frames each time the cue comes on (port/src/common/ac_cue_pc.c) */
 void portInputApply(PADStatus* pad) {
+#ifndef _WIN32
+    static u16 sLiveButton = 0;
+    static s8 sLiveStickX = 0, sLiveStickY = 0;
+    static int sLiveFrames = 0;
+
+    if (sLiveFrames <= 0) {
+        FILE* f = fopen("/tmp/ttyd_input.cmd", "r");
+        if (f != NULL) {
+            char line[128];
+            sLiveButton = 0;
+            sLiveStickX = 0;
+            sLiveStickY = 0;
+            sLiveFrames = 1;
+            while (fgets(line, sizeof(line), f)) {
+                char cmd[32];
+                if (sscanf(line, "%31s", cmd) == 1) {
+                    if (strcmp(cmd, "a") == 0) sLiveButton |= PAD_BUTTON_A;
+                    else if (strcmp(cmd, "b") == 0) sLiveButton |= PAD_BUTTON_B;
+                    else if (strcmp(cmd, "x") == 0) sLiveButton |= PAD_BUTTON_X;
+                    else if (strcmp(cmd, "y") == 0) sLiveButton |= PAD_BUTTON_Y;
+                    else if (strcmp(cmd, "start") == 0) sLiveButton |= PAD_BUTTON_START;
+                    else if (strcmp(cmd, "left") == 0) sLiveButton |= PAD_BUTTON_LEFT;
+                    else if (strcmp(cmd, "right") == 0) sLiveButton |= PAD_BUTTON_RIGHT;
+                    else if (strcmp(cmd, "up") == 0) sLiveButton |= PAD_BUTTON_UP;
+                    else if (strcmp(cmd, "down") == 0) sLiveButton |= PAD_BUTTON_DOWN;
+                    else if (strcmp(cmd, "stick") == 0) {
+                        int sx = 0, sy = 0;
+                        sscanf(line, "%*s %d %d", &sx, &sy);
+                        sLiveStickX = (s8)sx;
+                        sLiveStickY = (s8)sy;
+                    }
+                    else if (strcmp(cmd, "frames") == 0) {
+                        sscanf(line, "%*s %d", &sLiveFrames);
+                    }
+                }
+            }
+            fclose(f);
+            unlink("/tmp/ttyd_input.cmd");
+        }
+    }
+
+    if (sLiveFrames > 0) {
+        pad[0].err = PAD_ERR_NONE;
+        pad[0].button |= sLiveButton;
+        pad[0].stickX = sLiveStickX;
+        pad[0].stickY = sLiveStickY;
+        if (sLiveButton & PAD_BUTTON_A) pad[0].analogA = 255;
+        if (sLiveButton & PAD_BUTTON_B) pad[0].analogB = 255;
+        sLiveFrames--;
+        if (sLiveFrames == 0) {
+            FILE* fd = fopen("/tmp/ttyd_input.done", "w");
+            if (fd != NULL) fclose(fd);
+        }
+    }
+#endif
+
     static int sPrevCue, sHold;
     static int sCuePress = -1;
     static int sHapticsPress;

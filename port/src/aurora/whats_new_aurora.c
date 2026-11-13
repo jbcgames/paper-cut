@@ -401,77 +401,7 @@ static void winDisp(CameraId camId, void* param) {
 }
 
 void portWhatsNewFrame(void) {
-    static int* sSeen;
-    static int sChecked, sWait;
-    const int current = versionNumber(portWhatsNewBuild);
-    if (sDone) {
-        if (sHudClosed) {
-            sHudClosed = 0;
-            statusWinForceCloseClear();
-        }
-        return;
-    }
-    if (!sChecked) {
-        const char* force = getenv("TTYD_WHATS_NEW");
-        const int* played = portSettingsDeclare("settings_hint_shown", 0, 0, 1);
-        sChecked = 1;
-        sSeen = portSettingsDeclare("whats_new_seen", 0, 0, 999999);
-        if (force != NULL) {
-            if (atoi(force) == 0) { /* $TTYD_WHATS_NEW=0: never; =1: this start, whatever was seen */
-                sDone = 1;
-                return;
-            }
-        } else if (current == 0 || getenv("TTYD_FAST") != NULL || getenv("TTYD_MAP") != NULL) {
-            sDone = 1; /* a dev build, or tests */
-            return;
-        } else if (*sSeen >= current) {
-            sDone = 1;
-            return;
-        } else if (*sSeen == 0 && !*played && !portSettingsFileFound()) {
-            /* the first start ever: nothing was updated (a settings.txt from
-             * 0.1.0 or 0.2.0 has neither key, but it was an update) */
-            *sSeen = current;
-            portSettingsSave();
-            sDone = 1;
-            return;
-        }
-    }
-    if (!sShowing) {
-        const SequenceType seq = seqGetSeq();
-        const int ready = (seq == SEQ_TITLE || seq == SEQ_LOAD) ||
-                          (seq == SEQ_GAME && gp != NULL && !gp->inBattle && marioStGetSystemLevel() == 0 &&
-                           marioChkKey() && marioChkCtrl());
-        if (portOnlineActive() || portReplayActive() || !ready) {
-            sWait = 0;
-            return;
-        }
-        if (++sWait < 30) { /* half a second in: the screen settled */
-            return;
-        }
-        sShowing = 1;
-        sTop = 0;
-        sHeld = 0xFFFF; /* what's held now doesn't count until let go */
-        if (current != 0) {
-            *sSeen = current;
-            portSettingsSave(); /* once: a crash or a closed window doesn't bring it back */
-        }
-        printf("[whats_new] %s\n", portWhatsNewVersion);
-        fflush(stdout);
-    }
-    if (!sHudClosed && seqGetSeq() == SEQ_GAME) {
-        sHudClosed = 1; /* (it would draw over the page) */
-        statusWinForceClose();
-    }
-    {
-        /* the mouse and touch: up while the window is (the wheel scrolls, a right click is B); a click or tap closes it */
-        float gx, gy;
-        if (portMenuPoint(&gx, &gy) == 1) {
-            sShowing = 0;
-            sDone = 1;
-            return;
-        }
-    }
-    dispEntry(CAMERA_2D, 904.0f, 1, winDisp, NULL);
+    return;
 }
 
 void portWhatsNewPad(PADStatus* pads) {

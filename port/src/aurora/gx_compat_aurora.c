@@ -16,6 +16,12 @@
  * entries clamped to MEM1's end; else (static data in the executable) a
  * 64 KiB window, which covers the game's built-in vertex tables. */
 void portGXSetArraySized(int attr, const void* data, unsigned char stride, unsigned int arrayBytes) {
+    static unsigned int sLastDiscEpoch = 0;
+    const unsigned int discEpoch = portGXDiscEpoch();
+    if (discEpoch != sLastDiscEpoch) {
+        sLastDiscEpoch = discEpoch;
+        AuroraInvalidateDiscArrays();
+    }
     uintptr_t p = (uintptr_t)data;
     uintptr_t mem1Lo = OSBaseAddress;
     uintptr_t mem1Hi = mem1Lo + OSGetPhysicalMemSize();

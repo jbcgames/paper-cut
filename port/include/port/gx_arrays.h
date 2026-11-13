@@ -45,6 +45,9 @@ void portGXForgetRange(const void* lo, const void* hi);
  * registered big-endian array. Draw-time ranges do not count, so a buffer's
  * endianness never comes from a stale range over freed memory. */
 int portGXIsDiscData(const void* data);
+/* Monotonic epoch bumped whenever disc arrays/blobs or heap ranges are registered
+ * or unregistered, so Aurora can keep read-only disc array hashes across frames. */
+unsigned int portGXDiscEpoch(void);
 
 #ifdef __cplusplus
 }

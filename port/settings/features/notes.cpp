@@ -173,15 +173,10 @@ void fetchArea(std::string area, std::string url) {
 }
 
 void startFetch(const std::string& area) { // (sLock held)
-  const std::string relay = relayHttps();
-  if (relay.empty()) {
-    sArea.state = PORT_NOTES_FAILED;
-    sArea.fetchedAt = SDL_GetTicks();
-    return;
-  }
-  sLoading = true;
-  sArea.state = PORT_NOTES_LOADING;
-  std::thread(fetchArea, area, relay + "/notes?area=" + area).detach();
+  (void)area;
+  sArea.state = PORT_NOTES_READY;
+  sArea.fetchedAt = SDL_GetTicks();
+  return;
 }
 
 // the relay's refusal ("<why>: <words>") in the page's English, which is translated
@@ -262,7 +257,7 @@ void post(const char* map, const std::string& body, const std::string& rated, in
 
 struct Register {
   Register() {
-    portSettingsDeclare("paper_notes", 1, 0, 1);
+    portSettingsDeclare("paper_notes", 0, 0, 1);
     portSettingsAddToggle("Multiplayer", "Paper notes",
                           "Notes other players left on the ground, from set phrases, and yours for them: the Start "
                           "menu's Online tab leaves and rates them. Off, none are fetched or shown.",
@@ -301,11 +296,7 @@ extern "C" void portNoteText(int phrase, int word, int game, char* out, int size
 }
 
 extern "C" int portNotesOn(void) {
-  static int* sOn = portSettingsDeclare("paper_notes", 1, 0, 1);
-  return sOn != nullptr && *sOn && !portOnlineActive() && !portReplayActive() && portOnlineRelayAt(0) != nullptr &&
-                 std::strncmp(portOnlineRelayAt(0), "wss://", 6) == 0
-             ? 1
-             : 0;
+  return 0;
 }
 
 extern "C" void portNotesWant(const char* map) {

@@ -53,7 +53,7 @@ static void waitUntil(OSTime when) {
         sFast = getenv("TTYD_FAST") != NULL;
     }
     if (!sFast && now < when && !portOnlineCatchingUp()) { /* (a watcher well behind: unpaced) */
-        SDL_DelayPrecise((Uint64)OSTicksToMicroseconds(when - now) * 1000);
+        SDL_DelayNS((Uint64)OSTicksToMicroseconds(when - now) * 1000);
     }
 }
 
@@ -77,7 +77,7 @@ static void paceReal(void) {
         sNext = now; /* the start, or after a stall */
     }
     if (now < sNext) {
-        SDL_DelayPrecise((Uint64)OSTicksToMicroseconds(sNext - now) * 1000);
+        SDL_DelayNS((Uint64)OSTicksToMicroseconds(sNext - now) * 1000);
     }
     sNext += field;
 }
@@ -94,7 +94,7 @@ static void paceSlowFast(void) {
         return;
     }
     if (sNextWall != 0 && now < sNextWall) {
-        SDL_DelayPrecise(sNextWall - now);
+        SDL_DelayNS(sNextWall - now);
         now = SDL_GetTicksNS();
     }
     if (sNextWall == 0 || (now > sNextWall && now - sNextWall > 100000000ull)) {
@@ -108,13 +108,14 @@ static void paceSlowFast(void) {
 static void paceFrame(void) {
     paceReal();
     paceSlowFast();
-    if (sNextRetrace == 0) {
-        sNextRetrace = OSGetTime();
+    OSTime now = OSGetTime();
+    if (sNextRetrace == 0 || now > sNextRetrace + FIELD_TICKS * 2) {
+        sNextRetrace = now;
     }
     waitUntil(sNextRetrace);
-    /* After a stall, resynchronize instead of running frames back to back. */
-    if (OSGetTime() - sNextRetrace > FIELD_TICKS * 4) {
-        sNextRetrace = OSGetTime();
+    now = OSGetTime();
+    if (now > sNextRetrace) {
+        sNextRetrace = now;
     }
     sNextRetrace += FIELD_TICKS;
 }

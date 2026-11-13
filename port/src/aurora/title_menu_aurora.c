@@ -183,17 +183,7 @@ static const char* const kLang[] = {"jp", "us"};
 #endif
 
 static int enabled(void) {
-    const char* e = getenv("TTYD_TITLE_MENU");
-    if (portOnlineActive() || portReplayActive()) {
-        return 0; /* (a session's games, a replay: the game's own Start, in step) */
-    }
-    if (e != NULL && e[0] != '\0') {
-        return atoi(e) != 0; /* (tests: forced on or off) */
-    }
-    if (getenv("TTYD_INPUT") != NULL) {
-        return 0; /* (tests' scripts press Start for the file select) */
-    }
-    return sOn == NULL || *sOn != 0;
+    return 0;
 }
 
 int portTitleScope(void) {
@@ -600,127 +590,7 @@ static void place(void) {
 }
 
 int portTitleMenuMain(void) {
-    readPad();
-    if (sState == S_OFF) {
-        if (!enabled()) {
-            sReopen = 0;
-            return 0;
-        }
-        if (sReopen) {
-            sReopen = 0;
-            open(0);
-        } else if (sTrg & (PAD_BUTTON_A | PAD_BUTTON_START)) {
-            sCur = B_PLAY;
-            open(1);
-            sTrg = 0;
-        } else {
-            return 0;
-        }
-    }
-    resReady();
-    /* the "Press Start" prompt out while the buttons are up */
-    wp2->fadeAlpha -= 0.15f;
-    if (wp2->fadeAlpha < 0.0f) {
-        wp2->fadeAlpha = 0.0f;
-    }
-    wp2->idle = 0;
-    switch (sState) {
-        case S_MENU: {
-            const int was = sCur;
-            sShow += 0.08f;
-            sShow = sShow > 1.0f ? 1.0f : sShow;
-            if (sLogo > 0.0f) { /* (back from the pages) */
-                sLogo -= 0.08f;
-                sLogo = sLogo < 0.0f ? 0.0f : sLogo;
-            }
-            if (sShow < 0.5f) {
-                break;
-            }
-            if (pointer() || (sTrg & (PAD_BUTTON_A | PAD_BUTTON_START))) {
-                psndSFXOn((const char*)0x20012);
-                switch (sCur) {
-                    case B_PLAY:
-                        sState = S_OFF; /* (the buttons fade as the curtain closes: frameHook) */
-                        return 2; /* (seq_title.c: the curtain, then the file select) */
-                    case B_MODES:
-                        sState = S_TO_MODES;
-                        sTimer = 0;
-                        break;
-                    default:
-                        sPage = sCur;
-                        sState = S_TO_PAGES;
-                        break;
-                }
-            } else if (sTrg & PAD_BUTTON_B) {
-                psndSFXOn((const char*)0x20013);
-                sState = S_CLOSING;
-            } else if (sDir & DEMO_STICK_LEFT) {
-                sCur = (sCur + BUTTONS - 1) % BUTTONS; /* (along the row, round at its ends) */
-            } else if (sDir & DEMO_STICK_RIGHT) {
-                sCur = (sCur + 1) % BUTTONS;
-            }
-            if (sCur != was) {
-                if (sDir != 0) {
-                    psndSFXOn((const char*)0x20005);
-                }
-                said();
-            }
-            break;
-        }
-        case S_CLOSING: /* B: the buttons go, the copyright comes back, "Press Start" again */
-            sShow -= 0.12f;
-            if (sShow <= 0.0f) {
-                sShow = 0.0f;
-                place();
-                sState = S_OFF;
-                resFree();
-                return 1;
-            }
-            break;
-        case S_TO_PAGES:
-            sShow -= 0.12f;
-            sLogo += 0.08f;
-            sLogo = sLogo > 1.0f ? 1.0f : sLogo;
-            if (sLogo >= 1.0f && sShow <= 0.0f && resReady()) {
-                sShow = 0.0f;
-                sState = S_PAGES;
-                pagesOpen();
-            }
-            break;
-        case S_PAGES:
-            if (pagesMain()) {
-                sState = S_MENU; /* (the logo and the buttons back in) */
-                sShow = 0.0f;
-                said();
-            }
-            return 1;
-        case S_TO_MODES: /* the title's own curtain, as for the files (seq_title.c states 10-12) */
-            sShow -= 0.12f;
-            if (sTimer == 0) {
-                fadeEntry(FADE_CURTAIN_SIDES_A1_TOP, 0, (GXColor){0xFF, 0xFF, 0xFF, 0xFF});
-                sTimer = 1;
-            } else if (sTimer == 1 && fadeIsFinish()) {
-                fadeEntry(FADE_CURTAIN_SIDES_Z1_3D, 0, (GXColor){0xFF, 0xFF, 0xFF, 0xFF});
-                sTimer = 2;
-            } else if (sTimer == 2 && fadeIsFinish()) {
-                int i;
-                sState = S_OFF;
-                resFree();
-                for (i = 0; i < 5; i++) {
-                    fadeReset(i);
-                }
-                fadeEntry(FADE_CURTAIN_SIDES_A1, 0, (GXColor){0x00, 0x00, 0x00, 0xFF});
-                tempStart();
-                return 1;
-            }
-            break;
-    }
-    sShow = sShow < 0.0f ? 0.0f : sShow;
-    place();
-    if (sShow > 0.0f) {
-        dispEntry(CAMERA_2D, 300.0f, 0, menuDisp, NULL);
-    }
-    return 1;
+    return 0;
 }
 
 void portTitleMenuInit(void) {

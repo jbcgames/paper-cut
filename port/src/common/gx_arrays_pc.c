@@ -32,7 +32,16 @@ static unsigned int sArrayNext;
 static BlobEntry sBlobs[PORT_GX_BLOB_REGISTRY];
 static unsigned int sBlobTop; /* slots in use or since freed */
 static unsigned int sBlobCap; /* PORT_GX_BLOB_REGISTRY, or TTYD_GX_BLOB_CAP to see the old overflow */
+static unsigned int sDiscEpoch;
 static void portGXForgetArrayRanges(const void* base, unsigned int size);
+
+unsigned int portGXDiscEpoch(void) {
+    return __atomic_load_n(&sDiscEpoch, __ATOMIC_ACQUIRE);
+}
+
+static inline void bumpDiscEpoch(void) {
+    __atomic_fetch_add(&sDiscEpoch, 1u, __ATOMIC_RELEASE);
+}
 
 static void registerArray(const void* data, unsigned int size, int le) {
     unsigned int i;
@@ -53,6 +62,7 @@ static void registerArray(const void* data, unsigned int size, int le) {
 }
 
 void portGXRegisterArray(const void* data, unsigned int size) {
+    bumpDiscEpoch();
     registerArray(data, size, 0);
 }
 
@@ -65,6 +75,7 @@ void portGXRegisterDiscBlob(const void* base, unsigned int size) {
     if (!base) {
         return;
     }
+    bumpDiscEpoch();
     for (i = 0; i < sBlobTop; i++) {
         if (sBlobs[i].base == base) {
             sBlobs[i].size = size;
@@ -100,6 +111,7 @@ void portGXRegisterDiscBlob(const void* base, unsigned int size) {
 void portGXUnregisterDiscBlob(const void* base) {
     unsigned int i;
     unsigned int size = 0;
+    bumpDiscEpoch();
     for (i = 0; i < sBlobTop; i++) {
         if (sBlobs[i].base == base) {
             if (sBlobs[i].size > size) {
@@ -168,6 +180,7 @@ void portGXForgetRange(const void* lo_, const void* hi_) {
     const uint8_t* lo = (const uint8_t*)lo_;
     const uint8_t* hi = (const uint8_t*)hi_;
     unsigned int i;
+    bumpDiscEpoch();
     for (i = 0; i < sBlobTop; i++) {
         if (sBlobs[i].base && sBlobs[i].base >= lo && sBlobs[i].base < hi) {
             sBlobs[i].base = NULL;

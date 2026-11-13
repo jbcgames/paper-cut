@@ -202,6 +202,9 @@ static void bgDisp(CameraId camId, void* param) {
     Mtx trans, scale;
     f32 sy;
     if (bgwork->flags & BG_RENDERING) {
+        GXSetFog(GX_FOG_NONE, 0.0f, 0.0f, 0.0f, 0.0f, (GXColor){0, 0, 0, 0});
+        GXSetNumIndStages(0);
+        GXSetTevDirect(GX_TEVSTAGE0);
         GXSetAlphaUpdate(GX_FALSE);
         GXSetCullMode(GX_CULL_BACK);
         GXSetZCompLoc(GX_TRUE);

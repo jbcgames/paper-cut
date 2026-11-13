@@ -119,6 +119,20 @@ if(TTYD_VERSION STREQUAL "G8MP01")
 endif()
 
 if(TTYD_BACKEND STREQUAL "aurora")
+    option(TTYD_AURORA_GLES "Use pre-patched native OpenGL ES 3.0 Aurora fork without Dawn" ON)
+    if(TTYD_AURORA_GLES)
+        message(STATUS "TTYD: Building with native Aurora OpenGL ES 3.0 backend without Dawn")
+        set(AURORA_ENABLE_GX ON CACHE BOOL "" FORCE)
+        set(AURORA_ENABLE_THP ON CACHE BOOL "" FORCE)
+        set(AURORA_ENABLE_CARD ON CACHE BOOL "" FORCE)
+        set(AURORA_ENABLE_DVD ON CACHE BOOL "" FORCE)
+        set(AURORA_ENABLE_RMLUI OFF CACHE BOOL "" FORCE)
+        set(AURORA_ENABLE_EXAMPLES OFF CACHE BOOL "" FORCE)
+        set(AURORA_ENABLE_TESTS OFF CACHE BOOL "" FORCE)
+        set(AURORA_DAWN_PROVIDER "none" CACHE STRING "" FORCE)
+        set(AURORA_NOD_PROVIDER "package" CACHE STRING "" FORCE)
+        set(AURORA_CACHE_USE_ZSTD OFF CACHE BOOL "" FORCE)
+    else()
     # extern/aurora is upstream Aurora; the port's fixes to it are patches
     # (port/patches/aurora, `git format-patch` from a local Aurora branch),
     # applied to its working tree here once each: one already applied is
@@ -176,6 +190,7 @@ if(TTYD_BACKEND STREQUAL "aurora")
         string(APPEND _stamp_out "${_name} ${_hash}\n")
         file(WRITE ${_stamp} "${_stamp_out}") # as each lands, so a failure keeps the ones before it
     endforeach()
+    endif() # NOT TTYD_AURORA_GLES
     if(ANDROID)
         # Android: SDL3 built from source (Aurora requires it there; port/android
         # compiles SDL's Java glue from the same tree, FETCHCONTENT_SOURCE_DIR_SDL),

@@ -4,7 +4,7 @@
 namespace {
 
 const bool sAdded = [] {
-  portSettingsDeclare("title_menu", 1, 0, 1);
+  portSettingsDeclare("title_menu", 0, 0, 1);
   portSettingsAddToggle("General", "Title menu",
                         "After Press Start, a menu before the files: Play, Modes (party games and battles on a file "
                         "that is never saved), Online and Settings. Off: straight to the files, as the original.",

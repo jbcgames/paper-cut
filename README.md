@@ -2,6 +2,8 @@
 
 <p align="center"><img src="docs/images/gif-launcher-opening.gif" alt="The launcher opening: the red curtains part on a paper night sky, the stage boards fold up, clouds pop up, the moon and stars drop on their strings and the footlights come up under the Paper Cut title and the list of discs" width="800"></p>
 
+> **RK3326 / PortMaster Fork (`jbcgames`):** Esta bifurcación adapta **Paper Cut** a dispositivos portátiles basados en **RK3326 / Mali-G31 MP2** (OpenGL ES 3.0 + KMSDRM vía PortMaster) con soporte en español, optimizaciones de renderizado GX/GL, eliminación de menús añadidos y pantalla de carga inicial propia. Consulta el resumen técnico completo y la guía de compilación e instalación en [docs/RK3326_PORT.md](docs/RK3326_PORT.md).
+
 **Paper Cut is a fan-made native port of Paper Mario: The Thousand-Year Door** for Windows, macOS, Linux, iOS and Android. It is the game's own code, rebuilt from its decompilation, so there is no emulator. It plays the Japanese (G8MJ01), US (G8ME01) and European (G8MP01) releases at any screen shape and frame rate, and adds co-op for up to four players at home or online, Luigi beside Mario in Brothers mode, versus battles, an open-world randomizer, Master Quest, a Director's Cut of what the game left out, Luigi, Peach or Bowser as the hero, a title menu with modes to play without a save file, and a long list of options you can change from the game's own Start menu.
 
 The game code is C, from the decompilation in [LLCOOLT/ttyd](https://github.com/LLCOOLT/ttyd). The GameCube platform under it (graphics, audio, input, disc, memory card) is replaced, through [Aurora](https://github.com/encounter/aurora) (WebGPU/Dawn and SDL3).

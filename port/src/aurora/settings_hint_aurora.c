@@ -111,32 +111,5 @@ static void hintDisp(CameraId camId, void* param) {
 
 /* each game frame (makeKey, src/system.c) */
 void portSettingsHintFrame(void) {
-    static int* sShown;
-    static int sSkip = -1;
-    if (sShown == NULL) {
-        sShown = portSettingsDeclare("settings_hint_shown", 0, 0, 1);
-    }
-    if (sSkip < 0) {
-        const char* force = getenv("TTYD_SETTINGS_HINT");
-        sSkip = force != NULL ? atoi(force) == 0 : getenv("TTYD_MAP") != NULL;
-    }
-    if (sAge < 0) {
-        /* the first room: the player has the controls in the field */
-        if (*sShown || sSkip || gp == NULL || seqGetSeq() != SEQ_GAME || gp->inBattle ||
-            marioStGetSystemLevel() != 0 || !marioChkKey() || !marioChkCtrl()) {
-            return;
-        }
-        sAge = 0;
-        *sShown = 1;
-        portSettingsSave(); /* once: a crash or a closed window doesn't bring it back */
-        printf("[hint] %s\n", HINT_TEXT);
-        fflush(stdout);
-    }
-    if (sAge >= HINT_FRAMES) {
-        return;
-    }
-    sAge++;
-    if (gp != NULL && !gp->inBattle && seqGetSeq() == SEQ_GAME) {
-        dispEntry(CAMERA_2D, 903.0f, 1, hintDisp, NULL);
-    }
+    return;
 }

@@ -1,0 +1,12 @@
+framerate=30
+vsync=1
+fullscreen=1
+widescreen=0
+resolution=0
+fps=1
+overlay_fps=1
+msaa=0
+no_pop_in=1
+pal_50hz=0
+skip_intro=0
+language=4

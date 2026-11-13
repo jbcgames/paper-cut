@@ -1229,7 +1229,9 @@ static void mapPcRelease(MapEntry* entry) {
  * map objects, animations, display lists, hit objects, lights, environment, the camera road and the map files.
  * Called by seq_mapchange when leaving a map.
  */
+extern void aurora_reset_geom_cache(void);
 void mapUnLoad(void) {
+    aurora_reset_geom_cache();
     MapEntry* entry2;
     MapEntry* entry;
     int i;

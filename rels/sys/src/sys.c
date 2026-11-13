@@ -362,26 +362,53 @@ void sys_01_msg_tex_capture_func(CameraId cameraId, void* param) {
     }
     sysWaitDrawSync();
     GXReadBoundingBox(&left, &top, &right, &bottom);
+    if (left >= right || top >= bottom) {
+        f32 drawWidth = width < 510.0f ? width : 510.0f;
+        left = (u16)((gp->fbWidth * 0.5f) - (drawWidth * 0.5f) - 4.0f);
+        right = (u16)((gp->fbWidth * 0.5f) + (drawWidth * 0.5f) + 4.0f);
+        top = (u16)((gp->efbHeight * 0.5f) - 24.0f);
+        bottom = (u16)((gp->efbHeight * 0.5f) + 24.0f);
+    }
     left -= left % 2u;
     top -= top % 2u;
     right += right % 2u;
     bottom += bottom % 2u;
     right += 2;
-    left -= 2;
+    if (left >= 2) {
+        left -= 2;
+    } else {
+        left = 0;
+    }
     if (right > gp->fbWidth) {
         right = gp->fbWidth;
     }
     if (bottom > gp->efbHeight) {
         bottom = gp->efbHeight;
     }
+    if (right <= left) {
+        right = left + 16;
+        if (right > gp->fbWidth) {
+            right = gp->fbWidth;
+            left = right > 16 ? right - 16 : 0;
+        }
+    }
+    if (bottom <= top) {
+        bottom = top + 16;
+        if (bottom > gp->efbHeight) {
+            bottom = gp->efbHeight;
+            top = bottom > 16 ? bottom - 16 : 0;
+        }
+    }
     w = right - left;
     h = bottom - top;
     wp->msgTexW = w;
     wp->msgTexH = h;
     wp->msgTex = smartAlloc(GXGetTexBufferSize(w, h, GX_TF_RGB5A3, GX_FALSE, 0), 1);
-    GXSetTexCopySrc(left, top, w, h);
-    GXSetTexCopyDst(w, h, GX_TF_RGB5A3, GX_FALSE);
-    GXCopyTex(wp->msgTex->address, GX_FALSE);
+    if (wp->msgTex != NULL) {
+        GXSetTexCopySrc(left, top, w, h);
+        GXSetTexCopyDst(w, h, GX_TF_RGB5A3, GX_FALSE);
+        GXCopyTex(wp->msgTex->address, GX_FALSE);
+    }
     GXPixModeSync();
     PSMTXCopy(saved, camera->view);
 }
@@ -519,63 +546,65 @@ static void display_func(CameraId cameraId, void* param) {
 
 #if VERSION >= VERSION_US
     // US: the subtitle texture from sys_01_msg_tex_capture_func is bent into a ring strip and faded in along it
-    PSMTXTrans(mtx, 0.0f, -40.0f, 0.0f);
-    PSMTXRotRad(rot, 'z', 0.017453292f * wp->angle);
-    PSMTXConcat(mtx, rot, mtx);
-    PSMTXConcat(camera->view, mtx, mtx);
-    GXLoadPosMtxImm(mtx, GX_PNMTX0);
-    GXSetCurrentMtx(GX_PNMTX0);
-    GXSetBlendMode(GX_BM_BLEND, GX_BL_SRCALPHA, GX_BL_INVSRCALPHA, GX_LO_CLEAR);
-    GXSetZCompLoc(GX_TRUE);
-    GXSetAlphaCompare(GX_ALWAYS, 0, GX_AOP_AND, GX_ALWAYS, 0);
-    GXSetZMode(GX_FALSE, GX_LEQUAL, GX_FALSE);
-    GXSetNumChans(1);
-    GXSetChanCtrl(GX_COLOR0A0, GX_FALSE, GX_SRC_REG, GX_SRC_VTX, GX_LIGHT_NULL, GX_DF_NONE, GX_AF_NONE);
-    GXSetNumTexGens(1);
-    GXSetTexCoordGen2(GX_TEXCOORD0, GX_TG_MTX2x4, GX_TG_TEX0, GX_TEXMTX0, GX_FALSE, GX_PTIDENTITY);
-    PSMTXScale(mtx, 1.05f * (512.0f / wp->msgTexW), 1.0f, 1.0f);
-    GXLoadTexMtxImm(mtx, GX_TEXMTX0, GX_MTX2x4);
-    GXSetNumTevStages(1);
-    GXSetTevOrder(GX_TEVSTAGE0, GX_TEXCOORD0, GX_TEXMAP0, GX_COLOR0A0);
-    GXSetTevOp(GX_TEVSTAGE0, GX_MODULATE);
-    GXInitTexObj(&tex, wp->msgTex->address, wp->msgTexW, wp->msgTexH, GX_TF_RGB5A3, GX_CLAMP, GX_CLAMP, GX_FALSE);
-    GXLoadTexObj(&tex, GX_TEXMAP0);
-    GXSetCullMode(GX_CULL_NONE);
-    GXClearVtxDesc();
-    GXSetVtxDesc(GX_VA_POS, GX_DIRECT);
-    GXSetVtxDesc(GX_VA_CLR0, GX_DIRECT);
-    GXSetVtxDesc(GX_VA_TEX0, GX_DIRECT);
-    GXSetVtxAttrFmt(GX_VTXFMT0, GX_VA_POS, GX_POS_XYZ, GX_F32, 0);
-    GXSetVtxAttrFmt(GX_VTXFMT0, GX_VA_CLR0, GX_CLR_RGBA, GX_RGBA8, 0);
-    GXSetVtxAttrFmt(GX_VTXFMT0, GX_VA_TEX0, GX_TEX_ST, GX_F32, 0);
-    GXBegin(GX_TRIANGLESTRIP, GX_VTXFMT0, 64);
-    for (i = 0; i < 64; i++) {
-        if (i & 1) {
-            r = 40.0f;
-        } else {
-            r = 54.0f;
+    if (wp->msgTex != NULL && wp->msgTexW > 0 && wp->msgTexH > 0) {
+        PSMTXTrans(mtx, 0.0f, -40.0f, 0.0f);
+        PSMTXRotRad(rot, 'z', 0.017453292f * wp->angle);
+        PSMTXConcat(mtx, rot, mtx);
+        PSMTXConcat(camera->view, mtx, mtx);
+        GXLoadPosMtxImm(mtx, GX_PNMTX0);
+        GXSetCurrentMtx(GX_PNMTX0);
+        GXSetBlendMode(GX_BM_BLEND, GX_BL_SRCALPHA, GX_BL_INVSRCALPHA, GX_LO_CLEAR);
+        GXSetZCompLoc(GX_TRUE);
+        GXSetAlphaCompare(GX_ALWAYS, 0, GX_AOP_AND, GX_ALWAYS, 0);
+        GXSetZMode(GX_FALSE, GX_LEQUAL, GX_FALSE);
+        GXSetNumChans(1);
+        GXSetChanCtrl(GX_COLOR0A0, GX_FALSE, GX_SRC_REG, GX_SRC_VTX, GX_LIGHT_NULL, GX_DF_NONE, GX_AF_NONE);
+        GXSetNumTexGens(1);
+        GXSetTexCoordGen2(GX_TEXCOORD0, GX_TG_MTX2x4, GX_TG_TEX0, GX_TEXMTX0, GX_FALSE, GX_PTIDENTITY);
+        PSMTXScale(mtx, 1.05f * (512.0f / wp->msgTexW), 1.0f, 1.0f);
+        GXLoadTexMtxImm(mtx, GX_TEXMTX0, GX_MTX2x4);
+        GXSetNumTevStages(1);
+        GXSetTevOrder(GX_TEVSTAGE0, GX_TEXCOORD0, GX_TEXMAP0, GX_COLOR0A0);
+        GXSetTevOp(GX_TEVSTAGE0, GX_MODULATE);
+        GXInitTexObj(&tex, wp->msgTex->address, wp->msgTexW, wp->msgTexH, GX_TF_RGB5A3, GX_CLAMP, GX_CLAMP, GX_FALSE);
+        GXLoadTexObj(&tex, GX_TEXMAP0);
+        GXSetCullMode(GX_CULL_NONE);
+        GXClearVtxDesc();
+        GXSetVtxDesc(GX_VA_POS, GX_DIRECT);
+        GXSetVtxDesc(GX_VA_CLR0, GX_DIRECT);
+        GXSetVtxDesc(GX_VA_TEX0, GX_DIRECT);
+        GXSetVtxAttrFmt(GX_VTXFMT0, GX_VA_POS, GX_POS_XYZ, GX_F32, 0);
+        GXSetVtxAttrFmt(GX_VTXFMT0, GX_VA_CLR0, GX_CLR_RGBA, GX_RGBA8, 0);
+        GXSetVtxAttrFmt(GX_VTXFMT0, GX_VA_TEX0, GX_TEX_ST, GX_F32, 0);
+        GXBegin(GX_TRIANGLESTRIP, GX_VTXFMT0, 64);
+        for (i = 0; i < 64; i++) {
+            if (i & 1) {
+                r = 40.0f;
+            } else {
+                r = 54.0f;
+            }
+            deg = (360.0f / 31.0f) * (i / 2);
+            u = 0.032258064f * (i / 2);
+            if (i & 1) {
+                v = 1.0f;
+            } else {
+                v = 0.0f;
+            }
+            rad = 6.2831855f * deg / 360.0f;
+            full = wp->alpha / 256;
+            rem = wp->alpha % 256;
+            c = cos(rad);
+            s = sin(rad);
+            GXPosition3f32(r * s, r * c, 0.0f);
+            if (i < full) {
+                GXColor4u8(0xFF, 0xFF, 0xFF, 0xFF);
+            } else if (i == full) {
+                GXColor4u8(0xFF, 0xFF, 0xFF, rem);
+            } else {
+                GXColor4u8(0xFF, 0xFF, 0xFF, 0);
+            }
+            GXTexCoord2f32(u, v);
         }
-        deg = (360.0f / 31.0f) * (i / 2);
-        u = 0.032258064f * (i / 2);
-        if (i & 1) {
-            v = 1.0f;
-        } else {
-            v = 0.0f;
-        }
-        rad = 6.2831855f * deg / 360.0f;
-        full = wp->alpha / 256;
-        rem = wp->alpha % 256;
-        c = cos(rad);
-        s = sin(rad);
-        GXPosition3f32(r * s, r * c, 0.0f);
-        if (i < full) {
-            GXColor4u8(0xFF, 0xFF, 0xFF, 0xFF);
-        } else if (i == full) {
-            GXColor4u8(0xFF, 0xFF, 0xFF, rem);
-        } else {
-            GXColor4u8(0xFF, 0xFF, 0xFF, 0);
-        }
-        GXTexCoord2f32(u, v);
     }
 #else
     msg = msgSearch(msg_tbl[wp->type]);

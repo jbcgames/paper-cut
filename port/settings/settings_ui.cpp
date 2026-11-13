@@ -1598,11 +1598,7 @@ extern "C" void portSettingsDraw(void) {
   }
   portSettingsCloudTick();
   if (portCrashReportPending() && !sOpen) {
-#if defined(__ANDROID__) || (defined(__APPLE__) && TARGET_OS_IPHONE)
-    drawCrashNotice(1.6f);
-#else
-    drawCrashNotice(sTouchDevice ? 1.6f : 1.0f);
-#endif
+    portCrashReportDismiss();
   }
   if (!sOpen) {
     sWasOpen = false;
