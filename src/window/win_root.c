@@ -200,7 +200,7 @@ static void winRootMouse(WindowWork* w) {
 static inline void winRootTabMain(WindowWork* w) {
     s32 i;
 
-    for (i = 0; i < WIN_ROOT_TABS; i++) {
+    for (i = 0; i < w->tabNum; i++) {
         switch (w->tab[i].state) {
             case 0:
                 w->tab[i].x = WIN_ROOT_TAB_X(w, i);
@@ -222,7 +222,7 @@ static inline void winRootTabMain(WindowWork* w) {
                 }
                 break;
             case 10:
-                w->tab[i].timer = WIN_SLIDE((WIN_ROOT_TAB_LAST - i) * 4);
+                w->tab[i].timer = WIN_SLIDE(((w->tabNum > 0 ? w->tabNum - 1 : 0) - i) * 4);
                 w->tab[i].state++;
                 break;
             case 12:
@@ -295,17 +295,8 @@ s32 PORT_HOOKABLE(winRootMain)(WindowWork* w) {
                 WIN_ROOT_ADD_TAB(3);
             }
             WIN_ROOT_ADD_TAB(4);
-#ifdef TTYD_BACKEND_AURORA
-            /* Paper Cut's Wardrobe, Online and Settings, on the second screen's menu too: the same code, with
-               its state in the second screen's own block (port/companion_section.h) */
-            WIN_ROOT_ADD_TAB(PORT_PAUSE_WARDROBE_TAB);
-            portPauseWardrobeInit(w);
-            WIN_ROOT_ADD_TAB(PORT_PAUSE_ONLINE_TAB);
-            portPauseOnlineInit(w);
-            WIN_ROOT_ADD_TAB(PORT_PAUSE_SETTINGS_TAB);
-            portPauseSettingsInit(w);
-#endif
             }
+            w->tabSel = 0;
 #if VERSION <= VERSION_DEMO_JP
             {
                 s32 j;
