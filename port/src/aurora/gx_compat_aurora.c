@@ -15,16 +15,36 @@
  * blob, capped at 65536 entries); else, inside emulated MEM1, up to 65536
  * entries clamped to MEM1's end; else (static data in the executable) a
  * 64 KiB window, which covers the game's built-in vertex tables. */
-void portGXSetArraySized(int attr, const void* data, unsigned char stride, unsigned int arrayBytes) {
+static inline void portGXSyncDiscEpoch(void) {
     static unsigned int sLastDiscEpoch = 0;
     const unsigned int discEpoch = portGXDiscEpoch();
     if (discEpoch != sLastDiscEpoch) {
         sLastDiscEpoch = discEpoch;
         AuroraInvalidateDiscArrays();
     }
+}
+
+void portGXSetArrayExplicit(int attr, const void* data, unsigned int size, unsigned char stride, int le);
+void portGXSetArrayExplicit(int attr, const void* data, unsigned int size, unsigned char stride, int le) {
+    portGXSyncDiscEpoch();
+    GXSetArrayExt((GXAttr)attr, data, size, stride, (unsigned char)le);
+}
+
+void portGXSetArraySized(int attr, const void* data, unsigned char stride, unsigned int arrayBytes) {
+    portGXSyncDiscEpoch();
+    static uintptr_t sMem1Lo = 0;
+    static uintptr_t sMem1Hi = 0;
+    if (sMem1Lo == 0) {
+        uintptr_t lo = OSBaseAddress;
+        u32 phys = OSGetPhysicalMemSize();
+        if (lo != 0 && phys != 0) {
+            sMem1Lo = lo;
+            sMem1Hi = lo + phys;
+        }
+    }
     uintptr_t p = (uintptr_t)data;
-    uintptr_t mem1Lo = OSBaseAddress;
-    uintptr_t mem1Hi = mem1Lo + OSGetPhysicalMemSize();
+    uintptr_t mem1Lo = sMem1Lo;
+    uintptr_t mem1Hi = sMem1Hi;
     u32 want = (u32)stride * 0x10000u;
     unsigned int size = 0;
     int le = 1;
@@ -44,23 +64,6 @@ void portGXSetArraySized(int attr, const void* data, unsigned char stride, unsig
             size = (mem1Hi - p) < want ? (u32)(mem1Hi - p) : want;
         } else {
             size = want < 0x10000u ? want : 0x10000u;
-        }
-        if (getenv("TTYD_GXARRAY_TRACE") != NULL) {
-            char name[160];
-            printf("[gxarray] unsized attr %d stride %u -> %u bytes from %s\n", attr, (unsigned)stride, size,
-                   portSymbolName(__builtin_return_address(0), name, sizeof(name)));
-        }
-    }
-    {
-        const char* v = getenv("TTYD_GXARRAY_TRACE");
-        static const void* last[32];
-        static unsigned int lastSize[32];
-        if (v != NULL && v[0] == '2' && attr >= 0 && attr < 32 && (last[attr] != data || lastSize[attr] != size)) {
-            char name[160];
-            last[attr] = data;
-            lastSize[attr] = size;
-            printf("[gxarray] attr %d %u bytes from %s (frame %u)\n", attr, size,
-                   portSymbolName(__builtin_return_address(0), name, sizeof(name)), (unsigned)VIGetRetraceCount());
         }
     }
     GXSetArray((GXAttr)attr, data, size, stride, le != 0);

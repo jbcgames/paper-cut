@@ -9,8 +9,155 @@
 #include "driver/fadedrv.h"
 #include "version.h"
 #ifdef TARGET_PC
+#include "driver/mapdrv.h"
 #include "port/hud.h"
 #include "port/toggles.h"
+
+extern DispCallback portMapDispObjCb(void);
+extern int portMapIsSafeOpaqueObj(const void* param);
+extern void portMapDispRunBegin(void);
+extern void portMapDispRunEnd(void);
+
+#define DISP_MAX_ENTRIES_PC 1024
+#define DISP_MAX_CAMS_PC 16
+
+typedef struct DispBatchItem {
+    DispEntry* entry;
+    PortMapBatchKey key;
+    s32 origIdx;
+} DispBatchItem;
+
+static DispBatchItem sBatchWork[DISP_MAX_ENTRIES_PC];
+static DispBatchItem sBatchTmp[DISP_MAX_ENTRIES_PC];
+static DispEntry* sOtherWork[DISP_MAX_ENTRIES_PC];
+static DispEntry* sSortTmp[DISP_MAX_ENTRIES_PC];
+static s32 sCamStart[DISP_MAX_CAMS_PC];
+static s32 sCamEnd[DISP_MAX_CAMS_PC];
+static int sCamBucketsValid = 0;
+static s32 sSortedEntryN = 0;
+static int sSafeMapRunActive = 0;
+static u8 sSafeMapCam = 0;
+static u8 sSafeMapMode = 0;
+
+static inline int _batchItemLessOrEq(const DispBatchItem* a, const DispBatchItem* b) {
+    const PortMapBatchKey* ka = &a->key;
+    const PortMapBatchKey* kb = &b->key;
+    if (ka->k0 != kb->k0) return ka->k0 < kb->k0;
+    if (ka->lightMask != kb->lightMask) return ka->lightMask < kb->lightMask;
+    if (ka->flags1 != kb->flags1) return ka->flags1 < kb->flags1;
+    if (ka->material != kb->material) return ka->material < kb->material;
+    if (ka->kc0Packed != kb->kc0Packed) return ka->kc0Packed < kb->kc0Packed;
+    if (ka->cullMode != kb->cullMode) return ka->cullMode < kb->cullMode;
+    if (ka->elementMask != kb->elementMask) return ka->elementMask < kb->elementMask;
+    if (ka->vcdTable != kb->vcdTable) return ka->vcdTable < kb->vcdTable;
+    if (ka->partCount != kb->partCount) return ka->partCount < kb->partCount;
+    return a->origIdx <= b->origIdx;
+}
+
+static void _sortBatchItems(DispBatchItem* arr, s32 n) {
+    s32 width, i;
+    if (n <= 1) {
+        return;
+    }
+    if (n <= 16) {
+        for (i = 1; i < n; i++) {
+            DispBatchItem cur = arr[i];
+            s32 j = i - 1;
+            while (j >= 0 && !_batchItemLessOrEq(&arr[j], &cur)) {
+                arr[j + 1] = arr[j];
+                j--;
+            }
+            arr[j + 1] = cur;
+        }
+        return;
+    }
+    for (width = 1; width < n; width <<= 1) {
+        for (i = 0; i < n; i += (width << 1)) {
+            s32 mid = i + width;
+            s32 right = i + (width << 1);
+            s32 a, b, dst;
+            if (mid >= n) {
+                continue;
+            }
+            if (right > n) {
+                right = n;
+            }
+            if (_batchItemLessOrEq(&arr[mid - 1], &arr[mid])) {
+                continue;
+            }
+            a = i;
+            b = mid;
+            dst = i;
+            while (a < mid && b < right) {
+                if (_batchItemLessOrEq(&arr[a], &arr[b])) {
+                    sBatchTmp[dst++] = arr[a++];
+                } else {
+                    sBatchTmp[dst++] = arr[b++];
+                }
+            }
+            while (a < mid) {
+                sBatchTmp[dst++] = arr[a++];
+            }
+            while (b < right) {
+                sBatchTmp[dst++] = arr[b++];
+            }
+            memcpy(&arr[i], &sBatchTmp[i], (size_t)(right - i) * sizeof(DispBatchItem));
+        }
+    }
+}
+
+static void _mergeSortEntries(DispEntry** arr, s32 n) {
+    s32 width, i;
+    if (n <= 1) {
+        return;
+    }
+    if (n <= 16) {
+        for (i = 1; i < n; i++) {
+            DispEntry* cur = arr[i];
+            f32 co = cur->order;
+            s32 j = i - 1;
+            while (j >= 0 && arr[j]->order > co) {
+                arr[j + 1] = arr[j];
+                j--;
+            }
+            arr[j + 1] = cur;
+        }
+        return;
+    }
+    for (width = 1; width < n; width <<= 1) {
+        for (i = 0; i < n; i += (width << 1)) {
+            s32 mid = i + width;
+            s32 right = i + (width << 1);
+            s32 a, b, dst;
+            if (mid >= n) {
+                continue;
+            }
+            if (right > n) {
+                right = n;
+            }
+            if (arr[mid - 1]->order <= arr[mid]->order) {
+                continue;
+            }
+            a = i;
+            b = mid;
+            dst = i;
+            while (a < mid && b < right) {
+                if (arr[a]->order <= arr[b]->order) {
+                    sSortTmp[dst++] = arr[a++];
+                } else {
+                    sSortTmp[dst++] = arr[b++];
+                }
+            }
+            while (a < mid) {
+                sSortTmp[dst++] = arr[a++];
+            }
+            while (b < right) {
+                sSortTmp[dst++] = arr[b++];
+            }
+            memcpy(&arr[i], &sSortTmp[i], (size_t)(right - i) * sizeof(DispEntry*));
+        }
+    }
+}
 #endif
 
 #define DISP_MAX_ENTRIES 1024
@@ -45,6 +192,10 @@ void dispInit(void) {
 /** Empties the display list at the start of each frame. */
 void dispReInit(void) {
     entry_n = 0;
+#ifdef TARGET_PC
+    sCamBucketsValid = 0;
+    sSortedEntryN = 0;
+#endif
 }
 
 /**
@@ -99,8 +250,106 @@ static s32 _sort(const void* sortA, const void* sortB) {
 }
 
 /** Sorts this frame's draw requests by order before the cameras are drawn. */
+#ifdef TARGET_PC
+static void portDispGroupMapObjects(void) {
+    DispCallback mapCb = portMapDispObjCb();
+    s32 i = 0;
+
+    while (i < entry_n) {
+        u8 camId = pSortWork[i]->cameraId;
+        u8 mode = pSortWork[i]->renderMode;
+        s32 j = i;
+        s32 batchN = 0;
+        s32 otherN = 0;
+
+        /* Modes 0 (opaque) and 1 (alpha-test cutout) share the same 400k depth band,
+         * write Z unconditionally for visible texels, and use GX_BM_NONE; grouping both
+         * across a contiguous (camId, mode 0|1) slice avoids interleaved 0/1 state splits. */
+        if (mode == 0 || mode == 1) {
+            while (j < entry_n && pSortWork[j]->cameraId == camId &&
+                   (pSortWork[j]->renderMode == 0 || pSortWork[j]->renderMode == 1)) {
+                j++;
+            }
+            if ((j - i) > 1) {
+                s32 k;
+                for (k = i; k < j; k++) {
+                    DispEntry* e = pSortWork[k];
+                    if (e->callback == mapCb && portMapIsSafeOpaqueObj(e->param)) {
+                        sBatchWork[batchN].entry = e;
+                        portMapFillBatchKey(e->param, e->renderMode, &sBatchWork[batchN].key);
+                        sBatchWork[batchN].origIdx = k;
+                        batchN++;
+                    } else {
+                        sOtherWork[otherN++] = e;
+                    }
+                }
+                if (batchN > 1 || (batchN > 0 && otherN > 0)) {
+                    if (batchN > 1) {
+                        _sortBatchItems(sBatchWork, batchN);
+                    }
+                    for (k = 0; k < batchN; k++) {
+                        pSortWork[i + k] = sBatchWork[k].entry;
+                    }
+                    for (k = 0; k < otherN; k++) {
+                        pSortWork[i + batchN + k] = sOtherWork[k];
+                    }
+                }
+            }
+        } else {
+            while (j < entry_n && pSortWork[j]->cameraId == camId && pSortWork[j]->renderMode == mode) {
+                j++;
+            }
+        }
+        i = j;
+    }
+}
+#endif
+
 void dispSort(void) {
+#ifdef TARGET_PC
+	if (entry_n <= DISP_MAX_ENTRIES_PC) {
+		s32 counts[DISP_MAX_CAMS_PC] = {0};
+		s32 pos[DISP_MAX_CAMS_PC];
+		s32 i;
+		int allSmall = 1;
+		for (i = 0; i < entry_n; i++) {
+			u8 c = pDispWork[i].cameraId;
+			if (c >= DISP_MAX_CAMS_PC) {
+				allSmall = 0;
+				break;
+			}
+			counts[c]++;
+		}
+		if (allSmall) {
+			s32 offset = 0;
+			for (i = 0; i < DISP_MAX_CAMS_PC; i++) {
+				sCamStart[i] = offset;
+				pos[i] = offset;
+				offset += counts[i];
+				sCamEnd[i] = offset;
+			}
+			for (i = 0; i < entry_n; i++) {
+				DispEntry* e = &pDispWork[i];
+				pSortWork[pos[e->cameraId]++] = e;
+			}
+			for (i = 0; i < DISP_MAX_CAMS_PC; i++) {
+				s32 cnt = sCamEnd[i] - sCamStart[i];
+				if (cnt > 1) {
+					_mergeSortEntries(&pSortWork[sCamStart[i]], cnt);
+				}
+			}
+			sCamBucketsValid = 1;
+			sSortedEntryN = entry_n;
+			portDispGroupMapObjects();
+			return;
+		}
+	}
+	sCamBucketsValid = 0;
 	qqsort(pSortWork, entry_n, sizeof(DispEntry*), _sort);
+	portDispGroupMapObjects();
+#else
+	qqsort(pSortWork, entry_n, sizeof(DispEntry*), _sort);
+#endif
 }
 
 /**
@@ -116,9 +365,47 @@ void dispDraw(CameraId camId) {
     }
 #endif
 
+#ifdef TARGET_PC
+    {
+        s32 iStart = (sCamBucketsValid && (u32)camId < DISP_MAX_CAMS_PC && entry_n == sSortedEntryN) ? sCamStart[camId] : 0;
+        s32 iEnd = (sCamBucketsValid && (u32)camId < DISP_MAX_CAMS_PC && entry_n == sSortedEntryN) ? sCamEnd[camId] : entry_n;
+        for (i = iStart; i < iEnd; i++) {
+#else
     for (i = 0; i < entry_n; i++) {
+#endif
         DispEntry* entry = pSortWork[i];
+#ifdef TARGET_PC
+        if (i == 0 && sSafeMapRunActive) {
+            portMapDispRunEnd();
+            sSafeMapRunActive = 0;
+        }
+#endif
         if (entry->cameraId == camId) {
+#ifdef TARGET_PC
+            int isSafeMap = ((entry->renderMode == 0 || entry->renderMode == 1) &&
+                             entry->callback == portMapDispObjCb() &&
+                             portMapIsSafeOpaqueObj(entry->param));
+            if (sSafeMapRunActive && isSafeMap && sSafeMapCam == camId &&
+                sSafeMapMode == entry->renderMode) {
+                currentWorkPtr = entry;
+                entry->callback(camId, entry->param);
+                if (i + 1 >= entry_n || pSortWork[i + 1]->cameraId != camId) {
+                    portMapDispRunEnd();
+                    sSafeMapRunActive = 0;
+                }
+                continue;
+            }
+            if (sSafeMapRunActive) {
+                portMapDispRunEnd();
+                sSafeMapRunActive = 0;
+            }
+            if (isSafeMap) {
+                portMapDispRunBegin();
+                sSafeMapRunActive = 1;
+                sSafeMapCam = camId;
+                sSafeMapMode = entry->renderMode;
+            }
+#endif
             GXSetColorUpdate(GX_TRUE);
             switch (camId) {
                 case 4:
@@ -179,6 +466,9 @@ void dispDraw(CameraId camId) {
 #endif
             entry->callback(camId, entry->param);
         }
+#ifdef TARGET_PC
+        }
+#endif
     }
 #if defined(TARGET_PC) && defined(TTYD_BACKEND_AURORA)
     portHudDraw(camId, NULL, NULL);
@@ -211,3 +501,25 @@ f32 dispCalcZ(Vec* input) {
 DispEntry* dispGetCurWork(void) {
     return currentWorkPtr;
 }
+
+#ifdef TARGET_PC
+extern int portImgHasPendingCapture(void);
+extern DispCallback portExtMakeTexture;
+
+/**
+ * Returns 1 if the queued display list contains work that must not be skipped on an undrawn frame
+ * (one-shot offscreen texture builds such as extMakeTexture / puniMakeTexture, or pending imgdrv captures).
+ * Note: animPaperPoseDisp queues on CAMERA_OFFSCREEN every frame with param == NULL and is skipped when
+ * the rest of the frame is undrawn.
+ */
+int portDispMustDraw(void) {
+    s32 i;
+    for (i = 0; i < entry_n; i++) {
+        const DispEntry* e = &pDispWork[i];
+        if (e->callback == portExtMakeTexture || (e->cameraId == CAMERA_OFFSCREEN && e->param != NULL)) {
+            return 1;
+        }
+    }
+    return portImgHasPendingCapture();
+}
+#endif

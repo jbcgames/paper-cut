@@ -227,6 +227,7 @@ void portDisplayFrame(void) {
         sCount += sCount < PORT_PERF_SAMPLES;
         if (sPacingLog != NULL) {
             fprintf(sPacingLog, "%.3f,%.3f\n", interval, work);
+            fflush(sPacingLog);
         }
     }
     sLastEnd = now;

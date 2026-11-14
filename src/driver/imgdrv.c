@@ -769,3 +769,26 @@ static void imgShadowDisp(CameraId camId, void* param) {
             break;
     }
 }
+
+#ifdef TARGET_PC
+/** Returns 1 if any live image entry still needs a drawn frame to capture its EFB texture. */
+int portImgHasPendingCapture(void) {
+    int i, j;
+    ImageEntry* entry;
+
+    if (wp == NULL || wp->entries == NULL) {
+        return 0;
+    }
+    for (i = 0, entry = wp->entries; i < wp->count; i++, entry++) {
+        if ((entry->flags & IMG_FLAG_USED) && entry->poseId != -1) {
+            for (j = 0; j < 3; j++) {
+                const ImageShadow* sh = &entry->shadows[j];
+                if ((sh->flags & IMG_SHADOW_USED) && (sh->flags & (IMG_SHADOW_PENDING | IMG_SHADOW_COPY_ONCE))) {
+                    return 1;
+                }
+            }
+        }
+    }
+    return 0;
+}
+#endif

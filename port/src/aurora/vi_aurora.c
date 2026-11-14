@@ -104,20 +104,31 @@ static void paceSlowFast(void) {
 }
 
 /* Waits for this field's start; the next one is FIELD_TICKS later (in game
- * time: slow speed's slower clock makes it later). */
+ * time: slow speed's slower clock makes it later). Allows catch-up ticks when
+ * a slow rendered frame exceeded one or two VSyncs so 60 Hz logic speed holds. */
 static void paceFrame(void) {
+    OSTime now;
     paceReal();
     paceSlowFast();
-    OSTime now = OSGetTime();
-    if (sNextRetrace == 0 || now > sNextRetrace + FIELD_TICKS * 2) {
+    now = OSGetTime();
+    if (sNextRetrace == 0 || now > sNextRetrace + FIELD_TICKS * 6) {
         sNextRetrace = now;
     }
     waitUntil(sNextRetrace);
     now = OSGetTime();
-    if (now > sNextRetrace) {
+    if (now > sNextRetrace + FIELD_TICKS * 4) {
         sNextRetrace = now;
     }
     sNextRetrace += FIELD_TICKS;
+}
+
+/* Returns 1 when the wall clock at the start of a frame is past this frame's
+ * scheduled start time (sNextRetrace - FIELD_TICKS) by more than a small margin. */
+int portViBehindSchedule(void) {
+    if (sNextRetrace <= FIELD_TICKS) {
+        return 0;
+    }
+    return OSGetTime() > sNextRetrace - (FIELD_TICKS / 4);
 }
 
 static void endFrame(void) {
@@ -391,11 +402,9 @@ static void retrace(int drawn) {
     }
     if (drawn) {
         portDisplayWorkDone();
-    }
-    paceFrame();
-    if (drawn) {
         endFrame();
     }
+    paceFrame();
     if (sPreCallback != NULL) {
         sPreCallback(sRetraceCount);
     }
@@ -445,6 +454,7 @@ static void retrace(int drawn) {
     portRewindFrame();    /* rewind's state, or a step back (rewind_aurora.c) */
     if (!drawn) {
         handleEvents(aurora_update()); /* (input as every frame; the frame begun stays the next one's) */
+        portDisplayFrameStart();
         return;
     }
     if (portFrameAdvanceWait()) {

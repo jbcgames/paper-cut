@@ -24,6 +24,7 @@
 #include <math.h>
 #include "driver/hitdrv.h"
 #ifdef TARGET_PC
+#include <string.h>
 #include "port/bedecode.h"
 #include "port/gx_arrays.h"
 #include "port/map_pc.h"
@@ -142,6 +143,125 @@ s32 error_count;
 BOOL error_flag;
 MapObject* current_mp;
 BOOL mapClipOffFlag;
+
+#ifdef TARGET_PC
+#include "driver/dispdrv.h"
+#include "driver/mapdrv.h"
+#include <string.h>
+
+typedef struct MapPassLightCacheEntry {
+    s16 groupIndex;
+    u32 lightMask;
+    u8 count;
+    LightEntry* lights[8];
+} MapPassLightCacheEntry;
+
+typedef struct MapPassFastState {
+    MapPassLightCacheEntry maskCache[16];
+    u8 maskCacheCount;
+    BOOL gxLightsValid;
+    u32 gxLightsViewGen;
+    u8 gxLightCount;
+    s32 gxAttnFn;
+    u32 gxLightMask;
+    LightEntry* gxLights[8];
+    BOOL ambValid;
+    GXColor ambient;
+} MapPassFastState;
+
+static MapPassFastState sMapFast;
+
+static inline void portMapMtxConcat(const Mtx a, const Mtx b, Mtx m) {
+    int i;
+    for (i = 0; i < 3; i++) {
+        f32 a0 = a[i][0], a1 = a[i][1], a2 = a[i][2], a3 = a[i][3];
+        m[i][0] = a0 * b[0][0] + a1 * b[1][0] + a2 * b[2][0];
+        m[i][1] = a0 * b[0][1] + a1 * b[1][1] + a2 * b[2][1];
+        m[i][2] = a0 * b[0][2] + a1 * b[1][2] + a2 * b[2][2];
+        m[i][3] = a0 * b[0][3] + a1 * b[1][3] + a2 * b[2][3] + a3;
+    }
+}
+static s32 portMapSetLightCached(MapObject* obj, LightEntry** lights);
+#define MAPOBJ_STATIC_TEV_UNSAFE_MASK ( \
+    MAPOBJ_FLAG_HIDE | MAPOBJ_FLAG_DISABLE | MAPOBJ_FLAG_GROUP | MAPOBJ_FLAG_IN_GROUP | \
+    MAPOBJ_FLAG_DEPTH_BIAS | MAPOBJ_FLAG_BBOX)
+
+#define MAPOBJ_DYNAMIC_TEV_MASK ( \
+    MAPOBJ_FLAG_PROJ_TEXTURE | MAPOBJ_FLAG_HIGHLIGHT | MAPOBJ_FLAG_HIGHLIGHT_OBJ_COLOR | \
+    MAPOBJ_FLAG_CHARGE_SHINE | MAPOBJ_FLAG_TEV_CALLBACK_MASK)
+
+typedef struct MapDispRunState {
+    BOOL active;
+    BOOL fogValid;
+    BOOL fogOn;
+    BOOL kc0Valid;
+    GXColor kc0;
+    BOOL cullValid;
+    u8 cullMode;
+    BOOL curMtxZeroValid;
+    BOOL blendValid;
+    u8 blendKey;
+    BOOL matValid;
+    s16 groupIndex;
+    const void* material;
+    u8 noColorStage;
+    u8 lightCount;
+    u8 nearLights;
+    u32 lightMask;
+    LightEntry* lights[8];
+    BOOL vcdValid;
+    s16 vcdGroup;
+    u32 vcdMask;
+    const void* vcdTable;
+    u8 vcdClrCnt;
+    u8 vcdTexCnt;
+    const void* vcdPos;
+    const void* vcdNrm;
+    const void* vcdActiveClr0;
+    const void* vcdClr[2];
+    const void* vcdTex[8];
+} MapDispRunState;
+
+static MapDispRunState sMapRun;
+
+static inline void mapDispRunResetMatVcd(void) {
+    sMapRun.kc0Valid = FALSE;
+    sMapRun.cullValid = FALSE;
+    sMapRun.curMtxZeroValid = FALSE;
+    sMapRun.blendValid = FALSE;
+    sMapRun.matValid = FALSE;
+    sMapRun.vcdValid = FALSE;
+    sMapRun.vcdClrCnt = 0;
+    sMapRun.vcdTexCnt = 0;
+    sMapRun.vcdActiveClr0 = NULL;
+}
+
+static BOOL mapObjHasDynamicTev(const MapObject* obj, const MapMaterial* mat) {
+    u32 flags = obj->flags;
+    if (flags & MAPOBJ_DYNAMIC_TEV_MASK) {
+        return TRUE;
+    }
+    if ((flags & MAPOBJ_FLAG_CHAR_SHADOW) && shadowGetCharShadowProjection() && shadowGetCharShadowTexObj()) {
+        return TRUE;
+    }
+    if ((flags & MAPOBJ_FLAG_DEPTH_SHADOW) && shadowGetDepthShadowTexObj()) {
+        return TRUE;
+    }
+    if ((flags & MAPOBJ_FLAG_PROJ_SHADOW) && shadowGetProjShadowTexObj()) {
+        return TRUE;
+    }
+    if ((flags & MAPOBJ_FLAG_DEPTH_SHADOW_ADD) && shadowGetDepthShadowTexObj()) {
+        return TRUE;
+    }
+    if (mat != NULL && mat->tevMode != NULL && *mat->tevMode == 9) {
+        return TRUE;
+    }
+    return FALSE;
+}
+
+static GXColor mapCalcLastStageBlendColor(s32 flags, GXColor color1, GXColor color2);
+void portMapDispRunEnd(void);
+#endif
 s32 activeGroup;
 MapWork* mapWork; // allocates two entries
 
@@ -589,6 +709,20 @@ static void makeDisplayList(BOOL group) {
 
     buf = _mapAlloc(0x10000);
     e = &wp->entries[group];
+#ifdef TARGET_PC
+    obj = e->objects;
+    for (i = 0; i < wp->entries[group].numJoints; i++, obj++) {
+        for (k = 0; k < 8; k++) {
+            obj->displayList[k] = NULL;
+            obj->displayListSize[k] = 0;
+        }
+    }
+    e->dispListSize = 0;
+    e->dispListBuf = NULL;
+    _mapFree(buf);
+    __mapdrv_make_dl = FALSE;
+    return;
+#endif
     __mapdrv_make_dl = TRUE;
     total = 0;
     for (pass = 0; pass < 2; pass++) {
@@ -1198,7 +1332,9 @@ static void _mapLoad(MapWork* wp, BOOL group, const char* map) {
             if (!(w3->entries[group].flags & MAPENT_FLAG_VER_1_02)) {
                 continue;
             }
+#ifndef TARGET_PC
             o->flags |= MAPOBJ_FLAG_DISPLAY_LIST;
+#endif
         }
     }
 #if VERSION >= VERSION_JP
@@ -1262,6 +1398,9 @@ void mapUnLoad(void) {
     }
 #if VERSION >= VERSION_JP
     disableMapDraw = FALSE;
+#endif
+#ifdef TTYD_BACKEND_AURORA
+    aurora_reset_geom_cache();
 #endif
     hitReInit();
     lightReInit();
@@ -1434,6 +1573,9 @@ void bmapUnLoad(void) {
     }
 #if VERSION >= VERSION_JP
     disableMapDraw = FALSE;
+#endif
+#ifdef TTYD_BACKEND_AURORA
+    aurora_reset_geom_cache();
 #endif
     hitReInit();
     lightReInit();
@@ -2158,6 +2300,42 @@ void mapMain(void) {
 
 static void mapSetTextureMatrix(MapMaterial* mat);
 
+#ifdef TARGET_PC
+static s32 portMapSetLightCached(MapObject* obj, LightEntry** lights) {
+    const MapJointDrawMode* dm = obj->joints->drawMode;
+    if (!sMapRun.active || (dm->modeFlags & MAP_DRAWMODE_NEAR_LIGHTS)) {
+        return mapSetLight(obj, lights);
+    }
+    {
+        s16 grp = obj->groupIndex;
+        u32 mask = dm->lightMask;
+        u8 i;
+        for (i = 0; i < sMapFast.maskCacheCount; i++) {
+            MapPassLightCacheEntry* e = &sMapFast.maskCache[i];
+            if (e->groupIndex == grp && e->lightMask == mask) {
+                if (e->count > 0) {
+                    memcpy(lights, e->lights, (size_t)e->count * sizeof(LightEntry*));
+                }
+                return (s32)e->count;
+            }
+        }
+        {
+            s32 cnt = mapSetLight(obj, lights);
+            if (sMapFast.maskCacheCount < 16) {
+                MapPassLightCacheEntry* e = &sMapFast.maskCache[sMapFast.maskCacheCount++];
+                e->groupIndex = grp;
+                e->lightMask = mask;
+                e->count = (u8)cnt;
+                if (cnt > 0) {
+                    memcpy(e->lights, lights, (size_t)cnt * sizeof(LightEntry*));
+                }
+            }
+            return cnt;
+        }
+    }
+}
+#endif
+
 static void _mapDispMapObj(CameraId cam, MapObject* obj);
 static void _mapDispMapObj(CameraId cam, MapObject* obj);
 static inline void mapSetObjFog(MapObject* obj);
@@ -2196,10 +2374,35 @@ static inline BOOL mapObjIsTranslucent(u32 flags, GXColor objColor, GXColor matC
 
 /** Draws every packed display list of the mesh straight from the map file. */
 static inline void callPackedLists(MapFileMesh* mesh) {
-    int j;
-    for (j = 0; j < mesh->displayListCount; j++) {
+    int count = mesh->displayListCount;
+#ifdef TTYD_BACKEND_AURORA
+    if (count <= 0) {
+        return;
+    }
+    if (count == 1) {
+        GXCallStaticDisplayList((void*)mesh->displayLists.packedLists[0].offset,
+                                mesh->displayLists.packedLists[0].size);
+        return;
+    }
+    int start = 0;
+    while (start < count) {
+        AuroraStaticDlDesc descs[128];
+        int chunk = count - start;
+        if (chunk > 128) {
+            chunk = 128;
+        }
+        for (int j = 0; j < chunk; j++) {
+            descs[j].data = (void*)mesh->displayLists.packedLists[start + j].offset;
+            descs[j].nbytes = mesh->displayLists.packedLists[start + j].size;
+        }
+        GXCallStaticDisplayListBatch(&mesh->displayLists.packedLists[start], descs, (u32)chunk);
+        start += chunk;
+    }
+#else
+    for (int j = 0; j < count; j++) {
         GXCallDisplayList((void*)mesh->displayLists.packedLists[j].offset, mesh->displayLists.packedLists[j].size);
     }
+#endif
 }
 
 /**
@@ -2250,52 +2453,110 @@ static void _mapDispMapObj(CameraId cam, MapObject* obj) {
                 mode = 2;
             }
         }
-        switch (mode) {
-            case 0:
-                GXSetBlendMode(GX_BM_NONE, GX_BL_ONE, GX_BL_ZERO, 7);
-                GXSetZCompLoc((GXBool)1);
-                GXSetAlphaCompare(GX_ALWAYS, 0, GX_AOP_AND, GX_ALWAYS, 0);
-                GXSetZMode((GXBool)1, GX_LEQUAL, (GXBool)1);
-                break;
+        {
+            u8 normMode = (u8)((mode > 4) ? 2 : mode);
+            u8 wantBlendKey = (u8)(normMode | ((cam == 1) ? 0x80u : 0u));
+            if (!sMapRun.active || !sMapRun.blendValid || sMapRun.blendKey != wantBlendKey) {
+                switch (mode) {
+                    case 0:
+                        GXSetBlendMode(GX_BM_NONE, GX_BL_ONE, GX_BL_ZERO, 7);
+                        GXSetZCompLoc((GXBool)1);
+                        GXSetAlphaCompare(GX_ALWAYS, 0, GX_AOP_AND, GX_ALWAYS, 0);
+                        GXSetZMode((GXBool)1, GX_LEQUAL, (GXBool)1);
+                        break;
 
-            case 3:
-                GXSetBlendMode(GX_BM_NONE, GX_BL_ONE, GX_BL_ZERO, 0);
-                GXSetZCompLoc((GXBool)1);
-                GXSetAlphaCompare(GX_ALWAYS, 0, GX_AOP_AND, GX_ALWAYS, 0);
-                GXSetZMode((GXBool)0, GX_LEQUAL, (GXBool)0);
-                break;
+                    case 3:
+                        GXSetBlendMode(GX_BM_NONE, GX_BL_ONE, GX_BL_ZERO, 0);
+                        GXSetZCompLoc((GXBool)1);
+                        GXSetAlphaCompare(GX_ALWAYS, 0, GX_AOP_AND, GX_ALWAYS, 0);
+                        GXSetZMode((GXBool)0, GX_LEQUAL, (GXBool)0);
+                        break;
 
-            case 1:
-                GXSetBlendMode(GX_BM_NONE, GX_BL_ONE, GX_BL_ZERO, 0);
-                GXSetZCompLoc((GXBool)0);
-                GXSetAlphaCompare(GX_GEQUAL, 0x80, GX_AOP_OR, GX_NEVER, 0);
-                GXSetZMode((GXBool)1, GX_LEQUAL, (GXBool)1);
-                break;
+                    case 1:
+                        GXSetBlendMode(GX_BM_NONE, GX_BL_ONE, GX_BL_ZERO, 0);
+                        GXSetZCompLoc((GXBool)0);
+                        GXSetAlphaCompare(GX_GEQUAL, 0x80, GX_AOP_OR, GX_NEVER, 0);
+                        GXSetZMode((GXBool)1, GX_LEQUAL, (GXBool)1);
+                        break;
 
-            case 4:
-                GXSetBlendMode(GX_BM_NONE, GX_BL_ONE, GX_BL_ZERO, 0);
-                GXSetZCompLoc((GXBool)0);
-                GXSetAlphaCompare(GX_GEQUAL, 0x80, GX_AOP_OR, GX_NEVER, 0);
-                GXSetZMode((GXBool)0, GX_LEQUAL, (GXBool)0);
-                break;
+                    case 4:
+                        GXSetBlendMode(GX_BM_NONE, GX_BL_ONE, GX_BL_ZERO, 0);
+                        GXSetZCompLoc((GXBool)0);
+                        GXSetAlphaCompare(GX_GEQUAL, 0x80, GX_AOP_OR, GX_NEVER, 0);
+                        GXSetZMode((GXBool)0, GX_LEQUAL, (GXBool)0);
+                        break;
 
-            case 2:
+                    case 2:
 
-            case 5:
+                    case 5:
 
-            default:
-                GXSetBlendMode(GX_BM_BLEND, GX_BL_SRCALPHA, GX_BL_INVSRCALPHA, 0);
-                GXSetZCompLoc((GXBool)1);
-                GXSetAlphaCompare(GX_ALWAYS, 0, GX_AOP_AND, GX_ALWAYS, 0);
-                GXSetZMode((GXBool)1, GX_LEQUAL, (GXBool)0);
-                break;
+                    default:
+                        GXSetBlendMode(GX_BM_BLEND, GX_BL_SRCALPHA, GX_BL_INVSRCALPHA, 0);
+                        GXSetZCompLoc((GXBool)1);
+                        GXSetAlphaCompare(GX_ALWAYS, 0, GX_AOP_AND, GX_ALWAYS, 0);
+                        GXSetZMode((GXBool)1, GX_LEQUAL, (GXBool)0);
+                        break;
+                }
+                if (cam == 1 && normMode != 1 && normMode != 4) {
+                    GXSetZCompLoc((GXBool)0);
+                }
+                if (sMapRun.active) {
+                    sMapRun.blendValid = TRUE;
+                    sMapRun.blendKey = wantBlendKey;
+                }
+            }
+        }
+    } else {
+        sMapRun.blendValid = FALSE;
+        if (cam == 1) {
+            GXSetZCompLoc((GXBool)0);
         }
     }
 
-    if (cam == 1) {
-        GXSetZCompLoc((GXBool)0);
+#ifdef TARGET_PC
+    portMapMtxConcat(camera->view, obj->modelWorldMtx, mtx);
+    GXLoadPosMtxImm(mtx, 0);
+    if (!(obj->flags & MAPOBJ_FLAG_DISPLAY_LIST)) {
+        const MapJointDrawMode* dmNrm = obj->joints->drawMode;
+        int needsNrm = 0;
+        if (dmNrm != NULL && ((dmNrm->modeFlags & MAP_DRAWMODE_NEAR_LIGHTS) || dmNrm->lightMask != 0)) {
+            if (!sMapRun.active || (dmNrm->modeFlags & MAP_DRAWMODE_NEAR_LIGHTS)) {
+                needsNrm = 1;
+            } else {
+                LightEntry* tmpL[8];
+                if (portMapSetLightCached(obj, tmpL) > 0) {
+                    needsNrm = 1;
+                }
+            }
+        }
+        if (needsNrm) {
+            PSMTXInvXpose(mtx, nrm);
+            GXLoadNrmMtxImm(nrm, 0);
+        }
     }
-
+    if (!sMapRun.active || !sMapRun.curMtxZeroValid) {
+        GXSetCurrentMtx(0);
+        if (sMapRun.active) {
+            sMapRun.curMtxZeroValid = TRUE;
+        }
+    }
+    {
+        GXCullMode wantCull = culling[obj->joints->drawMode->cullMode];
+        if (sMapRun.active && !(obj->flags & MAPOBJ_FLAG_DISPLAY_LIST)) {
+            if (!sMapRun.cullValid || sMapRun.cullMode != (u8)wantCull) {
+                GXSetCullMode(wantCull);
+                sMapRun.cullValid = TRUE;
+                sMapRun.cullMode = (u8)wantCull;
+            }
+        } else {
+            GXGetCullMode(&cull);
+            if (cull != wantCull) {
+                GXSetCullMode(wantCull);
+            }
+            sMapRun.cullValid = FALSE;
+        }
+    }
+#else
     PSMTXConcat(camera->view, obj->modelWorldMtx, mtx);
     GXLoadPosMtxImm(mtx, 0);
     if (!(obj->flags & MAPOBJ_FLAG_DISPLAY_LIST)) {
@@ -2307,6 +2568,7 @@ static void _mapDispMapObj(CameraId cam, MapObject* obj) {
     if (cull != culling[obj->joints->drawMode->cullMode]) {
         GXSetCullMode(culling[obj->joints->drawMode->cullMode]);
     }
+#endif
     mapSetObjFog(obj);
     // a translucent-pass object is not drawn when it is hidden, unlit-only or fully transparent
     if (!(obj->flags & MAPOBJ_FLAG_IN_GROUP) ||
@@ -2318,7 +2580,11 @@ static void _mapDispMapObj(CameraId cam, MapObject* obj) {
                 mapSetTextureMatrix(material);
                 mapSetMaterialLastStageBlend(obj->flags, obj->color, ((MapMaterial*)material)->blendColor);
                 mapSetPolygonVtxDesc(obj, mesh);
+#ifdef TTYD_BACKEND_AURORA
+                GXCallStaticDisplayList(obj->displayList[i], obj->displayListSize[i]);
+#else
                 GXCallDisplayList(obj->displayList[i], obj->displayListSize[i]);
+#endif
                 callPackedLists(mesh);
             }
 
@@ -2326,6 +2592,78 @@ static void _mapDispMapObj(CameraId cam, MapObject* obj) {
             for (i = 0; i < obj->joints->partCount; i++) {
                 material = obj->joints->parts[i].material;
                 mesh = obj->joints->parts[i].mesh;
+#ifdef TARGET_PC
+                if (sMapRun.active) {
+                    MapMaterial* mat = (MapMaterial*)material;
+                    MapWork* mwp = mapGetWork();
+                    if ((mwp->entries[obj->groupIndex].flags & MAPENT_FLAG_VER_1_02) && !mapObjHasDynamicTev(obj, mat)) {
+                        MapJointDrawMode* dm = obj->joints->drawMode;
+                        GXColor kc0 = mapCalcLastStageBlendColor(obj->flags, obj->color, mat->blendColor);
+                        u8 noCol = (obj->flags & MAPOBJ_FLAG_NO_COLOR_STAGE) ? 1 : 0;
+                        u8 nearL = (dm->modeFlags & MAP_DRAWMODE_NEAR_LIGHTS) ? 1 : 0;
+                        u32 lMask = dm->lightMask;
+                        BOOL sameMatBase = sMapRun.matValid &&
+                                           sMapRun.groupIndex == obj->groupIndex &&
+                                           sMapRun.material == material &&
+                                           sMapRun.noColorStage == noCol;
+                        LightEntry* curLights[8];
+                        s32 curLightCount = 0;
+                        BOOL curLightsPopulated = FALSE;
+                        BOOL matHit = FALSE;
+
+                        if (!sMapRun.kc0Valid || sMapRun.kc0.r != kc0.r || sMapRun.kc0.g != kc0.g ||
+                            sMapRun.kc0.b != kc0.b || sMapRun.kc0.a != kc0.a) {
+                            GXSetTevKColor(GX_KCOLOR0, kc0);
+                            sMapRun.kc0 = kc0;
+                            sMapRun.kc0Valid = TRUE;
+                        }
+
+                        if (!nearL && lMask == 0) {
+                            curLightCount = 0;
+                            curLightsPopulated = TRUE;
+                            matHit = sameMatBase && (sMapRun.lightCount == 0);
+                        } else if (!nearL && lMask != 0 && sMapRun.matValid && !sMapRun.nearLights &&
+                                   sMapRun.groupIndex == obj->groupIndex && sMapRun.lightMask == lMask) {
+                            matHit = sameMatBase;
+                            if (!matHit) {
+                                curLightCount = sMapRun.lightCount;
+                                if (curLightCount > 0) {
+                                    memcpy(curLights, sMapRun.lights, (size_t)curLightCount * sizeof(LightEntry*));
+                                }
+                                curLightsPopulated = TRUE;
+                            }
+                        } else {
+                            curLightCount = mapSetLight(obj, curLights);
+                            curLightsPopulated = TRUE;
+                            matHit = sameMatBase &&
+                                     curLightCount == (s32)sMapRun.lightCount &&
+                                     (curLightCount == 0 ||
+                                      memcmp(curLights, sMapRun.lights, (size_t)curLightCount * sizeof(LightEntry*)) == 0);
+                        }
+
+                        if (!matHit) {
+                            mapSetTextureMatrix(mat);
+                            mapSetMaterial(obj, material);
+                            if (!curLightsPopulated) {
+                                curLightCount = mapSetLight(obj, curLights);
+                            }
+                            sMapRun.matValid = TRUE;
+                            sMapRun.groupIndex = obj->groupIndex;
+                            sMapRun.material = material;
+                            sMapRun.noColorStage = noCol;
+                            sMapRun.nearLights = nearL;
+                            sMapRun.lightMask = lMask;
+                            sMapRun.lightCount = (u8)curLightCount;
+                            if (curLightCount > 0) {
+                                memcpy(sMapRun.lights, curLights, (size_t)curLightCount * sizeof(LightEntry*));
+                            }
+                        }
+                        mapSetPolygon(obj, mesh);
+                        continue;
+                    }
+                    mapDispRunResetMatVcd();
+                }
+#endif
                 mapSetTextureMatrix(material);
                 mapSetMaterialLastStageBlend(obj->flags, obj->color, ((MapMaterial*)material)->blendColor);
                 mapSetMaterial(obj, material);
@@ -2344,6 +2682,10 @@ static void _mapDispMapObj(CameraId cam, MapObject* obj) {
         GXSetTevDirect(GX_TEVSTAGE3);
         GXSetTevDirect(GX_TEVSTAGE4);
         GXSetNumIndStages(0);
+#ifdef TARGET_PC
+        sMapRun.cullValid = FALSE;
+        sMapFast.gxLightsValid = FALSE;
+#endif
     }
 }
 
@@ -2409,6 +2751,11 @@ void test_kururing_mapdisp(CameraId cam) {
     int i;
     MapObject* obj;
 
+#ifdef TARGET_PC
+    if (sMapRun.active) {
+        portMapDispRunEnd();
+    }
+#endif
     for (i = 0; i < wp->entries[0].count; entry++, i++) {
         obj = entry->objects;
         for (j = 0; j < entry->numJoints; j++, obj++) {
@@ -3482,7 +3829,7 @@ void mapSetMaterialTev(s32 texCount, s32 drawMode, s32 flags, Mtx mtx) {
  * the material alpha (color2.r) and the map-wide blend colours and colour unless the object opts out.
  * Shared with animdrv.
  */
-void mapSetMaterialLastStageBlend(s32 flags, GXColor color1, GXColor color2) {
+static GXColor mapCalcLastStageBlendColor(s32 flags, GXColor color1, GXColor color2) {
     MapWork* wp = mapGetWork();
     GXColor color = {0xFF, 0xFF, 0xFF, 0xFF};
 
@@ -3513,7 +3860,11 @@ void mapSetMaterialLastStageBlend(s32 flags, GXColor color1, GXColor color2) {
         color.b = color.b * wp->entries[0].color.b / 255;
         color.a = color.a * wp->entries[0].color.a / 255;
     }
-    GXSetTevKColor(GX_KCOLOR0, color);
+    return color;
+}
+
+void mapSetMaterialLastStageBlend(s32 flags, GXColor color1, GXColor color2) {
+    GXSetTevKColor(GX_KCOLOR0, mapCalcLastStageBlendColor(flags, color1, color2));
 }
 
 // .sdata: defined here so it follows mapSetMaterialTev's scrl_uv$1622 in .sdata, as in the target
@@ -3539,13 +3890,25 @@ void mapSetMaterialFog(void) {
 static inline void mapSetObjFog(MapObject* obj) {
     CameraEntry* camera = camGetCurPtr();
     MapWork* wp = mapGetWork();
+    BOOL fogOn = ((wp->entries[0].flags & MAPENT_FLAG_FOG) && !(obj->flags & MAPOBJ_FLAG_NO_FOG)) ? TRUE : FALSE;
 
-    if ((wp->entries[0].flags & MAPENT_FLAG_FOG) && !(obj->flags & MAPOBJ_FLAG_NO_FOG)) {
+#ifdef TARGET_PC
+    if (sMapRun.active && sMapRun.fogValid && sMapRun.fogOn == fogOn) {
+        return;
+    }
+#endif
+    if (fogOn) {
         GXSetFog((GXFogType)fog_type[wp->entries[0].fogType], wp->entries[0].fogStart, wp->entries[0].fogEnd,
                  camera->near, camera->far, wp->entries[0].fogColor);
     } else {
         GXSetFog(GX_FOG_NONE, 0.0f, 0.0f, 0.0f, 0.0f, (GXColor){0xFF, 0xFF, 0xFF, 0xFF});
     }
+#ifdef TARGET_PC
+    if (sMapRun.active) {
+        sMapRun.fogOn = fogOn;
+        sMapRun.fogValid = TRUE;
+    }
+#endif
 }
 
 /**
@@ -3613,6 +3976,152 @@ static void mapSetTextureMatrix(MapMaterial* mat) {
     }
 }
 
+#ifdef TARGET_PC
+typedef struct MapLightObjCacheEntry {
+    u32 viewGen;
+    const LightEntry* light;
+    s32 isChara;
+    u32 flags;
+    Vec pos;
+    Vec rot;
+    Vec attenDistCoef;
+    f32 attenAngle;
+    f32 spotAngle;
+    GXColor color;
+    u8 setsSpotAttn;
+    GXLightObj lightObj;
+} MapLightObjCacheEntry;
+
+#define MAP_LIGHT_OBJ_CACHE_SIZE 64u
+static MapLightObjCacheEntry sMapLightObjCache[MAP_LIGHT_OBJ_CACHE_SIZE];
+static Mtx sMapLightViewCache;
+static u32 sMapLightViewGen = 1u;
+static int sMapLightViewInit = 0;
+
+static inline u32 mapLightViewGen(const Mtx curView) {
+    if (!sMapLightViewInit || memcmp(sMapLightViewCache, curView, sizeof(Mtx)) != 0) {
+        memcpy(sMapLightViewCache, curView, sizeof(Mtx));
+        sMapLightViewInit = 1;
+        sMapLightViewGen++;
+        if (sMapLightViewGen == 0) {
+            memset(sMapLightObjCache, 0, sizeof(sMapLightObjCache));
+            sMapLightViewGen = 1;
+        }
+    }
+    return sMapLightViewGen;
+}
+
+typedef struct MapMatTexCacheEntry {
+    const void* tpl;
+    const void* texTable;
+    const void* samplerTex;
+    s32 texIndex;
+    u8 wrapS;
+    u8 wrapT;
+    u8 valid;
+    char name[64];
+    const TEXHeader* header;
+    const void* data;
+    u16 width;
+    u16 height;
+    u32 format;
+    f32 minLOD;
+    f32 maxLOD;
+    f32 lodBias;
+    u8 edgeLODEnable;
+    GXTexObj texObj;
+} MapMatTexCacheEntry;
+
+#define MAP_MAT_TEX_CACHE_SIZE 512u
+static MapMatTexCacheEntry sMapMatTexCache[MAP_MAT_TEX_CACHE_SIZE];
+#endif
+
+static void mapPrepareLightObj(LightEntry* light, Mtx curView, u32 viewGen, int isChara, GXLightObj* outObj, s32* attnFn) {
+#ifdef TARGET_PC
+    uintptr_t addr = (uintptr_t)light;
+    u32 slot = (u32)((addr >> 4) ^ (addr >> 11) ^ (uintptr_t)(isChara ? 0x9e3779b9u : 0u)) & (MAP_LIGHT_OBJ_CACHE_SIZE - 1u);
+    MapLightObjCacheEntry* ce = &sMapLightObjCache[slot];
+    if (ce->viewGen == viewGen && ce->light == light && ce->isChara == isChara && ce->flags == light->flags &&
+        ce->pos.x == light->position.x && ce->pos.y == light->position.y && ce->pos.z == light->position.z &&
+        ce->rot.x == light->rotation.x && ce->rot.y == light->rotation.y && ce->rot.z == light->rotation.z &&
+        ce->attenDistCoef.x == light->attenDistCoef.x && ce->attenDistCoef.y == light->attenDistCoef.y &&
+        ce->attenDistCoef.z == light->attenDistCoef.z &&
+        ce->attenAngle == light->attenAngle && ce->spotAngle == light->spotAngle &&
+        ce->color.r == light->color.r && ce->color.g == light->color.g &&
+        ce->color.b == light->color.b && ce->color.a == light->color.a) {
+        *outObj = ce->lightObj;
+        if (ce->setsSpotAttn) {
+            *attnFn = GX_AF_SPOT;
+        }
+        return;
+    }
+#endif
+    Vec pos;
+    Vec dir = {0.0f, 0.0f, -1.0f};
+    Mtx rotX, rotY, rotZ;
+    u8 setsSpotAttn = 0;
+
+    memset(outObj, 0, sizeof(*outObj));
+    if (light->flags & LIGHT_POINT) {
+        MTXMultVec(curView, &light->position, &pos);
+        GXInitLightPos(outObj, pos.x, pos.y, pos.z);
+        GXInitLightColor(outObj, light->color);
+        if (isChara && (light->flags & LIGHT_NO_DIST_ATTEN)) {
+            GXInitLightAttn(outObj, light->attenAngle, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f);
+        } else {
+            GXInitLightAttn(outObj, light->attenAngle, 0.0f, 0.0f, light->attenDistCoef.x, light->attenDistCoef.y, light->attenDistCoef.z);
+            setsSpotAttn = 1;
+        }
+    } else if (light->flags & LIGHT_SPOT) {
+        MTXRotRad(rotX, 'x', MTXDegToRad(light->rotation.x));
+        MTXRotRad(rotY, 'y', MTXDegToRad(light->rotation.y));
+        MTXRotRad(rotZ, 'z', MTXDegToRad(light->rotation.z));
+        MTXConcat(rotZ, rotY, rotY);
+        MTXConcat(rotY, rotX, rotX);
+        MTXMultVec(rotX, &dir, &dir);
+        VECScale(&dir, &dir, -1048576.0f);
+        VECAdd(&light->position, &dir, &pos);
+        MTXMultVec(curView, &pos, &pos);
+        GXInitLightPos(outObj, pos.x, pos.y, pos.z);
+        GXInitLightColor(outObj, light->color);
+        if (!isChara) {
+            GXInitLightAttn(outObj, light->attenAngle, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f);
+        }
+    } else if (light->flags & LIGHT_DIRECTIONAL) {
+        MTXMultVec(curView, &light->position, &pos);
+        MTXRotRad(rotX, 'x', MTXDegToRad(light->rotation.x));
+        MTXRotRad(rotY, 'y', MTXDegToRad(light->rotation.y));
+        MTXRotRad(rotZ, 'z', MTXDegToRad(light->rotation.z));
+        MTXConcat(rotZ, rotY, rotY);
+        MTXConcat(rotY, rotX, rotX);
+        MTXMultVec(rotX, &dir, &dir);
+        MTXMultVecSR(curView, &dir, &dir);
+        GXInitLightPos(outObj, pos.x, pos.y, pos.z);
+        GXInitLightDir(outObj, dir.x, dir.y, dir.z);
+        GXInitLightSpot(outObj, light->spotAngle * 0.5f, GX_SP_SHARP);
+        GXInitLightDistAttn(outObj, 1000.0f, 0.5f, GX_DA_OFF);
+        GXInitLightColor(outObj, light->color);
+        setsSpotAttn = 1;
+    }
+    if (setsSpotAttn) {
+        *attnFn = GX_AF_SPOT;
+    }
+#ifdef TARGET_PC
+    ce->viewGen = viewGen;
+    ce->light = light;
+    ce->isChara = isChara;
+    ce->flags = light->flags;
+    ce->pos = light->position;
+    ce->rot = light->rotation;
+    ce->attenDistCoef = light->attenDistCoef;
+    ce->attenAngle = light->attenAngle;
+    ce->spotAngle = light->spotAngle;
+    ce->color = light->color;
+    ce->setsSpotAttn = setsSpotAttn;
+    ce->lightObj = *outObj;
+#endif
+}
+
 /**
  * Sets up GX for drawing one part of a map object with material:
  * up to 8 lights (point, spot, directional) with the ambient light, the material colour and lighting mode,
@@ -3637,57 +4146,65 @@ static void mapSetMaterial(MapObject* obj, void* material) {
     TEXDescriptor* desc;
     GXBool mip;
     GXLightObj lightObj;
-    Mtx rotX, rotY, rotZ;
     LightEntry* lights[8];
     GXTexObj texObj;
-    Vec pos;
+    Mtx* curView = (Mtx*)camGetCurPtr()->view;
+#ifdef TARGET_PC
+    u32 viewGen = mapLightViewGen(*curView);
+#else
+    u32 viewGen = 0;
+#endif
 
     texIdx = 0;
+#ifdef TARGET_PC
+    count = portMapSetLightCached(obj, lights);
+    if (sMapRun.active && sMapFast.gxLightsValid &&
+        sMapFast.gxLightsViewGen == viewGen &&
+        sMapFast.gxLightCount == (u8)count &&
+        (count == 0 || memcmp(sMapFast.gxLights, lights, (size_t)count * sizeof(LightEntry*)) == 0)) {
+        lightMask = sMapFast.gxLightMask;
+        attnFn = sMapFast.gxAttnFn;
+    } else {
+        attnFn = GX_AF_NONE;
+        lightMask = 0;
+        for (i = 0; i < count; i++) {
+            mapPrepareLightObj(lights[i], *curView, viewGen, 0, &lightObj, &attnFn);
+            GXLoadLightObjImm(&lightObj, lightid_tbl[i]);
+            lightMask |= lightid_tbl[i];
+        }
+        if (sMapRun.active) {
+            sMapFast.gxLightsValid = TRUE;
+            sMapFast.gxLightsViewGen = viewGen;
+            sMapFast.gxLightCount = (u8)count;
+            sMapFast.gxAttnFn = attnFn;
+            sMapFast.gxLightMask = lightMask;
+            if (count > 0) {
+                memcpy(sMapFast.gxLights, lights, (size_t)count * sizeof(LightEntry*));
+            }
+        }
+    }
+
+    if (sMapRun.active && sMapFast.ambValid) {
+        ambient = sMapFast.ambient;
+    } else {
+        light = lightGetAmbient();
+        if (light) {
+            ambient = light->color;
+        } else {
+            ambient = ambColor;
+        }
+        if (sMapRun.active) {
+            sMapFast.ambValid = TRUE;
+            sMapFast.ambient = ambient;
+        }
+    }
+#else
     attnFn = GX_AF_NONE;
     count = mapSetLight(obj, lights);
     lightMask = 0;
     for (i = 0; i < count; i++) {
-        Vec dir = {0.0f, 0.0f, -1.0f};
-
-        light = lights[i];
-        if (light->flags & LIGHT_POINT) {
-            MTXMultVec(camGetCurPtr()->view, &light->position, &pos);
-            GXInitLightPos(&lightObj, pos.x, pos.y, pos.z);
-            GXInitLightColor(&lightObj, lights[i]->color);
-            GXInitLightAttn(&lightObj, lights[i]->attenAngle, 0.0f, 0.0f, lights[i]->attenDistCoef.x, lights[i]->attenDistCoef.y, lights[i]->attenDistCoef.z);
-            GXLoadLightObjImm(&lightObj, lightid_tbl[i]);
-            attnFn = GX_AF_SPOT;
-        } else if (light->flags & LIGHT_SPOT) {
-            MTXRotRad(rotX, 'x', MTXDegToRad(light->rotation.x));
-            MTXRotRad(rotY, 'y', MTXDegToRad(lights[i]->rotation.y));
-            MTXRotRad(rotZ, 'z', MTXDegToRad(lights[i]->rotation.z));
-            MTXConcat(rotZ, rotY, rotY);
-            MTXConcat(rotY, rotX, rotX);
-            MTXMultVec(rotX, &dir, &dir);
-            VECScale(&dir, &dir, -1048576.0f);
-            VECAdd(&lights[i]->position, &dir, &pos);
-            MTXMultVec(camGetCurPtr()->view, &pos, &pos);
-            GXInitLightPos(&lightObj, pos.x, pos.y, pos.z);
-            GXInitLightColor(&lightObj, lights[i]->color);
-            GXInitLightAttn(&lightObj, lights[i]->attenAngle, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f);
-            GXLoadLightObjImm(&lightObj, lightid_tbl[i]);
-        } else if (light->flags & LIGHT_DIRECTIONAL) {
-            MTXMultVec(camGetCurPtr()->view, &light->position, &pos);
-            MTXRotRad(rotX, 'x', MTXDegToRad(lights[i]->rotation.x));
-            MTXRotRad(rotY, 'y', MTXDegToRad(lights[i]->rotation.y));
-            MTXRotRad(rotZ, 'z', MTXDegToRad(lights[i]->rotation.z));
-            MTXConcat(rotZ, rotY, rotY);
-            MTXConcat(rotY, rotX, rotX);
-            MTXMultVec(rotX, &dir, &dir);
-            MTXMultVecSR(camGetCurPtr()->view, &dir, &dir);
-            GXInitLightPos(&lightObj, pos.x, pos.y, pos.z);
-            GXInitLightDir(&lightObj, dir.x, dir.y, dir.z);
-            GXInitLightSpot(&lightObj, lights[i]->spotAngle / 2, GX_SP_SHARP);
-            GXInitLightDistAttn(&lightObj, 1000.0f, 0.5f, GX_DA_OFF);
-            GXInitLightColor(&lightObj, lights[i]->color);
-            GXLoadLightObjImm(&lightObj, lightid_tbl[i]);
-            attnFn = GX_AF_SPOT;
-        }
+        mapPrepareLightObj(lights[i], *curView, viewGen, 0, &lightObj, &attnFn);
+        GXLoadLightObjImm(&lightObj, lightid_tbl[i]);
         lightMask |= lightid_tbl[i];
     }
 
@@ -3697,6 +4214,7 @@ static void mapSetMaterial(MapObject* obj, void* material) {
     } else {
         ambient = ambColor;
     }
+#endif
     GXSetNumChans(1);
     GXSetChanAmbColor(GX_COLOR0A0, ambient);
     GXSetChanMatColor(GX_COLOR0A0, mat->color);
@@ -3711,9 +4229,70 @@ static void mapSetMaterial(MapObject* obj, void* material) {
             break;
     }
 
+    wp = mapGetWork();
     for (i = mat->samplerCount - 1; i >= 0; i--) {
         sampler = mat->samplers[i];
-        wp = mapGetWork();
+#ifdef TARGET_PC
+        {
+            TEXPalettePtr tpl = wp->entries[obj->groupIndex].tpl;
+            const void* texTable = wp->entries[obj->groupIndex].textureTable;
+            const char* tname = sampler->tex->name;
+            uintptr_t h = (uintptr_t)tpl ^ ((uintptr_t)sampler->tex >> 3) ^ ((uintptr_t)sampler->wrapS << 7) ^ ((uintptr_t)sampler->wrapT << 11);
+            u32 slot = (u32)(h ^ (h >> 9)) & (MAP_MAT_TEX_CACHE_SIZE - 1u);
+            MapMatTexCacheEntry* te = &sMapMatTexCache[slot];
+            if (te->valid && te->tpl == tpl && te->texTable == texTable && te->samplerTex == sampler->tex &&
+                te->wrapS == sampler->wrapS && te->wrapT == sampler->wrapT && strcmp(te->name, tname) == 0) {
+                desc = TEXGet(tpl, (u32)te->texIndex);
+                if (desc != NULL && desc->textureHeader == te->header &&
+                    desc->textureHeader->data == te->data && desc->textureHeader->width == te->width &&
+                    desc->textureHeader->height == te->height && desc->textureHeader->format == te->format &&
+                    desc->textureHeader->minLOD == te->minLOD && desc->textureHeader->maxLOD == te->maxLOD &&
+                    desc->textureHeader->LODBias == te->lodBias && desc->textureHeader->edgeLODEnable == te->edgeLODEnable) {
+                    texObj = te->texObj;
+                    GXLoadTexObj(&texObj, (GXTexMapID)texIdx);
+                    texIdx++;
+                    continue;
+                }
+            }
+            k = mapSearchTexName((MapTexTable*)texTable, tname);
+            desc = TEXGet(tpl, (u32)k);
+            if (desc->textureHeader->minLOD == desc->textureHeader->maxLOD) {
+                mip = GX_FALSE;
+            } else {
+                mip = GX_TRUE;
+            }
+            GXInitTexObj(&texObj, desc->textureHeader->data, desc->textureHeader->width, desc->textureHeader->height, (GXTexFmt)desc->textureHeader->format,
+                         (GXTexWrapMode)texwrap_tbl[sampler->wrapS], (GXTexWrapMode)texwrap_tbl[sampler->wrapT],
+                         mip);
+            GXInitTexObjLOD(&texObj, GX_LINEAR, GX_LINEAR, desc->textureHeader->minLOD, desc->textureHeader->maxLOD, desc->textureHeader->LODBias, GX_FALSE, desc->textureHeader->edgeLODEnable, GX_ANISO_1);
+            if (desc != NULL && desc->textureHeader != NULL) {
+                size_t len = strlen(tname);
+                if (len < sizeof(te->name)) {
+                    te->tpl = tpl;
+                    te->texTable = texTable;
+                    te->samplerTex = sampler->tex;
+                    te->texIndex = k;
+                    te->wrapS = (u8)sampler->wrapS;
+                    te->wrapT = (u8)sampler->wrapT;
+                    memcpy(te->name, tname, len + 1);
+                    te->header = desc->textureHeader;
+                    te->data = desc->textureHeader->data;
+                    te->width = desc->textureHeader->width;
+                    te->height = desc->textureHeader->height;
+                    te->format = desc->textureHeader->format;
+                    te->minLOD = desc->textureHeader->minLOD;
+                    te->maxLOD = desc->textureHeader->maxLOD;
+                    te->lodBias = desc->textureHeader->LODBias;
+                    te->edgeLODEnable = desc->textureHeader->edgeLODEnable;
+                    te->texObj = texObj;
+                    te->valid = 1;
+                }
+            }
+            GXLoadTexObj(&texObj, (GXTexMapID)texIdx);
+            texIdx++;
+            continue;
+        }
+#else
         k = mapSearchTexName(wp->entries[obj->groupIndex].textureTable, sampler->tex->name);
         desc = TEXGet(wp->entries[obj->groupIndex].tpl, k);
         if (desc->textureHeader->minLOD == desc->textureHeader->maxLOD) {
@@ -3727,6 +4306,7 @@ static void mapSetMaterial(MapObject* obj, void* material) {
         GXInitTexObjLOD(&texObj, GX_LINEAR, GX_LINEAR, desc->textureHeader->minLOD, desc->textureHeader->maxLOD, desc->textureHeader->LODBias, GX_FALSE, desc->textureHeader->edgeLODEnable, GX_ANISO_1);
         GXLoadTexObj(&texObj, (GXTexMapID)texIdx);
         texIdx++;
+#endif
     }
     mapSetMaterialTev(mat->samplerCount, mat->tevMode ? *mat->tevMode : 0, obj->flags, obj->modelWorldMtx);
 }
@@ -3754,7 +4334,42 @@ static inline void mapResetPaperCraftAmbColor(void) {
  * flags 1 and 0x10 add the paper light, 8 the paper-craft light, 2 the nearest character lights;
  * flag 4 lights a white material colour instead of the vertex colours. Fog is turned off.
  */
-void mapSetMaterialLight(s32 flags, Vec position) {
+static s32 portMapTryGetNearCharaLights(LightEntry** out, s32 maxOut) {
+    s32 n = lightGetEntryNum();
+    s32 found = 0;
+    s32 i;
+    for (i = 0; i < n; i++) {
+        LightEntry* le = lightNumberToPtr(i);
+        if ((le->flags & (LIGHT_ENABLED | LIGHT_CHARA)) == (LIGHT_ENABLED | LIGHT_CHARA)) {
+            if (found < maxOut) {
+                out[found] = le;
+            }
+            found++;
+        }
+    }
+    return found;
+}
+
+int portMapCanReuseAnimPoseLight(s32 lightFlags, s32 matFlags) {
+    s32 n, enabledChara = 0, i;
+    if (matFlags & MAPOBJ_FLAG_TEV_CALLBACK_MASK) {
+        return 0;
+    }
+    if (!(lightFlags & ANIM_MATERIAL_LIGHT_CHARA) &&
+        !(lightFlags & (ANIM_MATERIAL_LIGHT_PAPER | ANIM_MATERIAL_LIGHT_PAPER_CRAFT | ANIM_MATERIAL_LIGHT_PAPER_NO_AMB))) {
+        return 1;
+    }
+    n = lightGetEntryNum();
+    for (i = 0; i < n; i++) {
+        LightEntry* le = lightNumberToPtr(i);
+        if ((le->flags & (LIGHT_ENABLED | LIGHT_CHARA)) == (LIGHT_ENABLED | LIGHT_CHARA)) {
+            enabledChara++;
+        }
+    }
+    return enabledChara <= 5;
+}
+
+static void mapSetMaterialLightImpl(s32 flags, Vec position, int clearFog) {
     GXColor matColor = {0xFF, 0xFF, 0xFF, 0xFF};
     GXColor ambColor = {0x00, 0x00, 0x00, 0xFF};
     s32 count;
@@ -3765,10 +4380,8 @@ void mapSetMaterialLight(s32 flags, Vec position) {
     u32 paperCraft;
     LightEntry* light;
     GXLightObj lightObj;
-    Mtx rotX, rotY, rotZ;
     LightEntry* lights[8];
     GXColor ambient;
-    Vec pos;
 
     count = 0;
     attnFn = GX_AF_NONE;
@@ -3787,7 +4400,16 @@ void mapSetMaterialLight(s32 flags, Vec position) {
         count++;
     }
     if ((flags & ANIM_MATERIAL_LIGHT_CHARA) && lightCheckCharaLight() && count < 8) {
+#ifdef TARGET_PC
+        s32 fastN = portMapTryGetNearCharaLights(&lights[count], 8 - count);
+        if (fastN <= 8 - count) {
+            count += fastN;
+        } else {
+            count += lightGetNearObj(&position, &lights[count], 8 - count, LIGHT_CHARA);
+        }
+#else
         count += lightGetNearObj(&position, &lights[count], 8 - count, LIGHT_CHARA);
+#endif
     }
     if (flags & (ANIM_MATERIAL_LIGHT_PAPER | ANIM_MATERIAL_LIGHT_PAPER_CRAFT | ANIM_MATERIAL_LIGHT_PAPER_NO_AMB)) {
         if (count == 1) {
@@ -3799,61 +4421,32 @@ void mapSetMaterialLight(s32 flags, Vec position) {
                 ambColor = (GXColor){0x00, 0x00, 0x00, 0xFF};
             }
         } else {
+#ifdef TARGET_PC
+            s32 fastN = portMapTryGetNearCharaLights(lights, 8);
+            if (fastN <= 8) {
+                count = fastN;
+            } else {
+                count = lightGetNearObj(&position, lights, 8, LIGHT_CHARA);
+            }
+#else
             count = lightGetNearObj(&position, lights, 8, LIGHT_CHARA);
+#endif
         }
     }
 
-    lightMask = 0;
-    for (i = 0; i < count; i++) {
-        Vec dir = {0.0f, 0.0f, -1.0f};
-
-        light = lights[i];
-        if (light->flags & LIGHT_POINT) {
-            MTXMultVec(camGetCurPtr()->view, &light->position, &pos);
-            GXInitLightPos(&lightObj, pos.x, pos.y, pos.z);
-            GXInitLightColor(&lightObj, lights[i]->color);
-            if (lights[i]->flags & LIGHT_NO_DIST_ATTEN) {
-                GXInitLightAttn(&lightObj, lights[i]->attenAngle, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f);
-            } else {
-                GXInitLightAttn(&lightObj, lights[i]->attenAngle, 0.0f, 0.0f, lights[i]->attenDistCoef.x, lights[i]->attenDistCoef.y, lights[i]->attenDistCoef.z);
-                attnFn = GX_AF_SPOT;
-            }
+    {
+        Mtx* curView = (Mtx*)camGetCurPtr()->view;
+#ifdef TARGET_PC
+        u32 viewGen = mapLightViewGen(*curView);
+#else
+        u32 viewGen = 0;
+#endif
+        lightMask = 0;
+        for (i = 0; i < count; i++) {
+            mapPrepareLightObj(lights[i], *curView, viewGen, 1, &lightObj, &attnFn);
             GXLoadLightObjImm(&lightObj, lightid_tbl[i]);
-        } else if (light->flags & LIGHT_SPOT) {
-            MTXRotRad(rotX, 'x', MTXDegToRad(light->rotation.x));
-            MTXRotRad(rotY, 'y', MTXDegToRad(lights[i]->rotation.y));
-            MTXRotRad(rotZ, 'z', MTXDegToRad(lights[i]->rotation.z));
-            MTXConcat(rotZ, rotY, rotY);
-            MTXConcat(rotY, rotX, rotX);
-            MTXMultVec(rotX, &dir, &dir);
-            VECScale(&dir, &dir, -1048576.0f);
-            VECAdd(&lights[i]->position, &dir, &pos);
-            MTXMultVec(camGetCurPtr()->view, &pos, &pos);
-            GXInitLightPos(&lightObj, pos.x, pos.y, pos.z);
-            GXInitLightColor(&lightObj, lights[i]->color);
-            GXLoadLightObjImm(&lightObj, lightid_tbl[i]);
-        } else if (light->flags & LIGHT_DIRECTIONAL) {
-            MTXMultVec(camGetCurPtr()->view, &light->position, &pos);
-            MTXRotRad(rotX, 'x', MTXDegToRad(lights[i]->rotation.x));
-            MTXRotRad(rotY, 'y', MTXDegToRad(lights[i]->rotation.y));
-            MTXRotRad(rotZ, 'z', MTXDegToRad(lights[i]->rotation.z));
-            MTXConcat(rotZ, rotY, rotY);
-            MTXConcat(rotY, rotX, rotX);
-            MTXMultVec(rotX, &dir, &dir);
-            MTXMultVecSR(camGetCurPtr()->view, &dir, &dir);
-            GXInitLightPos(&lightObj, pos.x, pos.y, pos.z);
-            GXInitLightDir(&lightObj, dir.x, dir.y, dir.z);
-            {
-                f32 ang = lights[i]->spotAngle;
-                ang *= 0.5f;
-                GXInitLightSpot(&lightObj, ang, GX_SP_SHARP);
-            }
-            GXInitLightDistAttn(&lightObj, 1000.0f, 0.5f, GX_DA_OFF);
-            GXInitLightColor(&lightObj, lights[i]->color);
-            GXLoadLightObjImm(&lightObj, lightid_tbl[i]);
-            attnFn = GX_AF_SPOT;
+            lightMask |= lightid_tbl[i];
         }
-        lightMask |= lightid_tbl[i];
     }
 
     light = lightGetCharaAmbient();
@@ -3862,7 +4455,9 @@ void mapSetMaterialLight(s32 flags, Vec position) {
     } else {
         ambient = ambColor;
     }
-    GXSetFog(GX_FOG_NONE, 0.0f, 0.0f, 0.0f, 0.0f, matColor);
+    if (clearFog) {
+        GXSetFog(GX_FOG_NONE, 0.0f, 0.0f, 0.0f, 0.0f, matColor);
+    }
     GXSetNumChans(1);
     GXSetChanAmbColor(GX_COLOR0A0, ambient);
     if (flags & ANIM_MATERIAL_LIGHT_NO_VTX_COLOR) {
@@ -3873,6 +4468,14 @@ void mapSetMaterialLight(s32 flags, Vec position) {
         GXSetChanCtrl(GX_COLOR0, count > 0, GX_SRC_REG, GX_SRC_VTX, lightMask, GX_DF_CLAMP, (GXAttnFn)attnFn);
         GXSetChanCtrl(GX_ALPHA0, GX_FALSE, GX_SRC_REG, GX_SRC_VTX, GX_LIGHT_NULL, GX_DF_CLAMP, GX_AF_NONE);
     }
+}
+
+void mapSetMaterialLight(s32 flags, Vec position) {
+    mapSetMaterialLightImpl(flags, position, 1);
+}
+
+void mapSetMaterialLightNoFog(s32 flags, Vec position) {
+    mapSetMaterialLightImpl(flags, position, 0);
 }
 
 /** Vertex formats of map geometry (float positions, normals and texture coordinates, RGBA8 colours). */
@@ -3895,6 +4498,126 @@ const GXVtxAttrFmtList attr_fmt[12] = {
  * Sends the mesh's geometry to GX: older map files as indexed float triangle strips written vertex by vertex,
  * ver1.02 files as packed s16 vertex arrays and the file's display lists.
  */
+static void mapApplyVer102Vcd(MapWork* wp, MapObject* obj, MapFileMesh* mesh) {
+    u32 mask = mesh->elementMask;
+    void* pos = mesh->vcdTable->positions->data;
+    void* nrm = mesh->vcdTable->normals->data;
+    int i;
+#ifdef TARGET_PC
+    if (sMapRun.active && sMapRun.vcdValid && sMapRun.vcdGroup == obj->groupIndex) {
+        if (sMapRun.vcdTable == mesh->vcdTable && sMapRun.vcdMask == mask) {
+            return;
+        }
+        u8 clrCnt = 0;
+        u8 texCnt = 0;
+        const void* targetClr0 = NULL;
+
+        if (sMapRun.vcdPos != pos) {
+            GXSetArray(GX_VA_POS, pos, 6);
+            sMapRun.vcdPos = pos;
+        }
+        if (sMapRun.vcdNrm != nrm) {
+            GXSetArray(GX_VA_NRM, nrm, 3);
+            sMapRun.vcdNrm = nrm;
+        }
+        for (i = 0; i < 2; i++) {
+            if (!(mask & (1 << (i + 2)))) {
+                break;
+            }
+            targetClr0 = mesh->vcdTable->colors[i]->data;
+            sMapRun.vcdClr[i] = targetClr0;
+            clrCnt++;
+        }
+        if (clrCnt > 0) {
+            if (sMapRun.vcdClrCnt == 0) {
+                GXSetVtxDesc(GX_VA_CLR0, GX_INDEX16);
+                GXSetVtxAttrFmt(GX_VTXFMT0, GX_VA_CLR0, GX_CLR_RGBA, GX_RGBA8, 0);
+            }
+            if (sMapRun.vcdClrCnt == 0 || sMapRun.vcdActiveClr0 != targetClr0) {
+                GXSetArray(GX_VA_CLR0, (void*)targetClr0, 4);
+                sMapRun.vcdActiveClr0 = targetClr0;
+            }
+        } else if (sMapRun.vcdClrCnt > 0) {
+            GXSetVtxDesc(GX_VA_CLR0, GX_NONE);
+            sMapRun.vcdActiveClr0 = NULL;
+        }
+        sMapRun.vcdClrCnt = clrCnt;
+
+        for (i = 0; i < 8; i++) {
+            if (!(mask & (1 << (i + 4)))) {
+                break;
+            }
+            texCnt++;
+        }
+        for (i = texCnt; i < (int)sMapRun.vcdTexCnt; i++) {
+            GXSetVtxDesc((GXAttr)(GX_VA_TEX0 + i), GX_NONE);
+        }
+        for (i = 0; i < (int)texCnt; i++) {
+            void* texData = mesh->vcdTable->texCoords[i]->data;
+            if (i >= (int)sMapRun.vcdTexCnt) {
+                GXSetVtxDesc((GXAttr)(GX_VA_TEX0 + i), GX_INDEX16);
+                GXSetVtxAttrFmt(GX_VTXFMT0, (GXAttr)(GX_VA_TEX0 + i), GX_TEX_ST, GX_S16,
+                                (u8)wp->entries[obj->groupIndex].vcdTable->texFrac[i]);
+            }
+            if (i >= (int)sMapRun.vcdTexCnt || sMapRun.vcdTex[i] != texData) {
+                GXSetArray((GXAttr)(GX_VA_TEX0 + i), texData, 4);
+                sMapRun.vcdTex[i] = texData;
+            }
+        }
+        sMapRun.vcdTexCnt = texCnt;
+        sMapRun.vcdMask = mask;
+        return;
+    }
+#endif
+    GXClearVtxDesc();
+    GXSetVtxDesc(GX_VA_POS, GX_INDEX16);
+    GXSetVtxAttrFmt(GX_VTXFMT0, GX_VA_POS, GX_POS_XYZ, GX_S16, (u8)wp->entries[obj->groupIndex].vcdTable->posFrac);
+    GXSetArray(GX_VA_POS, pos, 6);
+    GXSetVtxDesc(GX_VA_NRM, GX_INDEX16);
+    GXSetVtxAttrFmt(GX_VTXFMT0, GX_VA_NRM, GX_NRM_XYZ, GX_S8, 6);
+    GXSetArray(GX_VA_NRM, nrm, 3);
+#ifdef TARGET_PC
+    sMapRun.vcdClrCnt = 0;
+    sMapRun.vcdTexCnt = 0;
+    sMapRun.vcdActiveClr0 = NULL;
+#endif
+    for (i = 0; i < 2; i++) {
+        if (!(mask & (1 << (i + 2)))) {
+            break;
+        }
+        GXSetVtxDesc(GX_VA_CLR0, GX_INDEX16);
+        GXSetVtxAttrFmt(GX_VTXFMT0, GX_VA_CLR0, GX_CLR_RGBA, GX_RGBA8, 0);
+        GXSetArray(GX_VA_CLR0, mesh->vcdTable->colors[i]->data, 4);
+#ifdef TARGET_PC
+        sMapRun.vcdClr[i] = mesh->vcdTable->colors[i]->data;
+        sMapRun.vcdActiveClr0 = mesh->vcdTable->colors[i]->data;
+        sMapRun.vcdClrCnt = (u8)(i + 1);
+#endif
+    }
+    for (i = 0; i < 8; i++) {
+        if (!(mask & (1 << (i + 4)))) {
+            break;
+        }
+        GXSetVtxDesc(GX_VA_TEX0 + i, GX_INDEX16);
+        GXSetVtxAttrFmt(GX_VTXFMT0, GX_VA_TEX0 + i, GX_TEX_ST, GX_S16, (u8)wp->entries[obj->groupIndex].vcdTable->texFrac[i]);
+        GXSetArray(GX_VA_TEX0 + i, mesh->vcdTable->texCoords[i]->data, 4);
+#ifdef TARGET_PC
+        sMapRun.vcdTex[i] = mesh->vcdTable->texCoords[i]->data;
+        sMapRun.vcdTexCnt = (u8)(i + 1);
+#endif
+    }
+#ifdef TARGET_PC
+    if (sMapRun.active) {
+        sMapRun.vcdValid = TRUE;
+        sMapRun.vcdGroup = obj->groupIndex;
+        sMapRun.vcdMask = mask;
+        sMapRun.vcdTable = mesh->vcdTable;
+        sMapRun.vcdPos = pos;
+        sMapRun.vcdNrm = nrm;
+    }
+#endif
+}
+
 static void mapSetPolygon(MapObject* obj, MapFileMesh* mesh) {
     MapWork* wp;
     void* pos;
@@ -3914,11 +4637,29 @@ static void mapSetPolygon(MapObject* obj, MapFileMesh* mesh) {
     nrm = vcd->normals->data;
     texCount = vcd->texCount;
 
-    GXSetCullMode(culling[obj->joints->drawMode->cullMode]);
+    {
+        u8 cull = obj->joints->drawMode->cullMode;
+#ifdef TARGET_PC
+        if (!sMapRun.active || !sMapRun.cullValid || sMapRun.cullMode != cull) {
+            GXSetCullMode(culling[cull]);
+            if (sMapRun.active) {
+                sMapRun.cullMode = cull;
+                sMapRun.cullValid = TRUE;
+            }
+        }
+#else
+        GXSetCullMode(culling[cull]);
+#endif
+    }
     if (!(wp->entries[obj->groupIndex].flags & MAPENT_FLAG_VER_1_02)) {
+#ifdef TARGET_PC
+        if (sMapRun.active) {
+            sMapRun.vcdValid = FALSE;
+        }
+#endif
         GXClearVtxDesc();
-        GXSetVtxAttrFmtv(GX_VTXFMT0, attr_fmt);
         GXSetVtxDesc(GX_VA_POS, GX_INDEX16);
+        GXSetVtxAttrFmtv(GX_VTXFMT0, attr_fmt);
         GXSetArray(GX_VA_POS, pos, 12);
         GXSetVtxDesc(GX_VA_NRM, GX_INDEX16);
         GXSetArray(GX_VA_NRM, nrm, 12);
@@ -3943,76 +4684,14 @@ static void mapSetPolygon(MapObject* obj, MapFileMesh* mesh) {
             }
         }
     } else {
-        u32 mask = mesh->elementMask;
-        GXClearVtxDesc();
-        GXSetVtxDesc(GX_VA_POS, GX_INDEX16);
-        GXSetVtxAttrFmt(GX_VTXFMT0, GX_VA_POS, GX_POS_XYZ, GX_S16, (u8)wp->entries[obj->groupIndex].vcdTable->posFrac);
-        GXSetArray(GX_VA_POS, pos, 6);
-        GXSetVtxDesc(GX_VA_NRM, GX_INDEX16);
-        GXSetVtxAttrFmt(GX_VTXFMT0, GX_VA_NRM, GX_NRM_XYZ, GX_S8, 6);
-        GXSetArray(GX_VA_NRM, nrm, 3);
-        for (i = 0; i < 2; i++) {
-            if (!(mask & (1 << (i + 2)))) {
-                break;
-            }
-            GXSetVtxDesc(GX_VA_CLR0, GX_INDEX16);
-            GXSetVtxAttrFmt(GX_VTXFMT0, GX_VA_CLR0, GX_CLR_RGBA, GX_RGBA8, 0);
-            GXSetArray(GX_VA_CLR0, mesh->vcdTable->colors[i]->data, 4);
-        }
-        for (i = 0; i < 8; i++) {
-            if (!(mask & (1 << (i + 4)))) {
-
-                break;
-            }
-            GXSetVtxDesc(GX_VA_TEX0 + i, GX_INDEX16);
-            GXSetVtxAttrFmt(GX_VTXFMT0, GX_VA_TEX0 + i, GX_TEX_ST, GX_S16, (u8)wp->entries[obj->groupIndex].vcdTable->texFrac[i]);
-            GXSetArray(GX_VA_TEX0 + i, mesh->vcdTable->texCoords[i]->data, 4);
-        }
-        for (i = 0; i < mesh->displayListCount; i++) {
-            GXCallDisplayList((void*)mesh->displayLists.packedLists[i].offset, mesh->displayLists.packedLists[i].size);
-        }
+        mapApplyVer102Vcd(wp, obj, mesh);
+        callPackedLists(mesh);
     }
 }
 
 /** Sets the GX vertex descriptors, formats and arrays for a ver1.02 packed mesh, ahead of calling its display lists. */
 static void mapSetPolygonVtxDesc(MapObject* obj, MapFileMesh* mesh) {
-
-    MapWork* wp;
-    u32 mask;
-    MapVcdTable* vcd;
-    void* pos;
-    void* nrm;
-    int i;
-
-    wp = mapGetWork();
-
-    vcd = mesh->vcdTable;
-    mask = mesh->elementMask;
-    pos = vcd->positions->data;
-    nrm = vcd->normals->data;
-    GXClearVtxDesc();
-    GXSetVtxDesc(GX_VA_POS, GX_INDEX16);
-    GXSetVtxAttrFmt(GX_VTXFMT0, GX_VA_POS, GX_POS_XYZ, GX_S16, (u8)wp->entries[obj->groupIndex].vcdTable->posFrac);
-    GXSetArray(GX_VA_POS, pos, 6);
-    GXSetVtxDesc(GX_VA_NRM, GX_INDEX16);
-    GXSetVtxAttrFmt(GX_VTXFMT0, GX_VA_NRM, GX_NRM_XYZ, GX_S8, 6);
-    GXSetArray(GX_VA_NRM, nrm, 3);
-    for (i = 0; i < 2; i++) {
-        if (!(mask & (1 << (i + 2)))) {
-            break;
-        }
-        GXSetVtxDesc(GX_VA_CLR0, GX_INDEX16);
-        GXSetVtxAttrFmt(GX_VTXFMT0, GX_VA_CLR0, GX_CLR_RGBA, GX_RGBA8, 0);
-        GXSetArray(GX_VA_CLR0, mesh->vcdTable->colors[i]->data, 4);
-    }
-    for (i = 0; i < 8; i++) {
-        if (!(mask & (1 << (i + 4)))) {
-            break;
-        }
-        GXSetVtxDesc(GX_VA_TEX0 + i, GX_INDEX16);
-        GXSetVtxAttrFmt(GX_VTXFMT0, GX_VA_TEX0 + i, GX_TEX_ST, GX_S16, (u8)wp->entries[obj->groupIndex].vcdTable->texFrac[i]);
-        GXSetArray(GX_VA_TEX0 + i, mesh->vcdTable->texCoords[i]->data, 4);
-    }
+    mapApplyVer102Vcd(mapGetWork(), obj, mesh);
 }
 
 /** Depth-first search of the joint tree (children, then later siblings) for the joint called name. */
@@ -4729,3 +5408,129 @@ static void mapStrippedPool(const char** str, f32* val) {
     str[7] = "animation_table";
     str[8] = "curve_table";
 }
+
+#ifdef TARGET_PC
+DispCallback portMapDispObjCb(void) {
+    return (DispCallback)mapDispMapObj;
+}
+
+int portMapIsSafeOpaqueObj(const void* param) {
+    const MapObject* obj = (const MapObject*)param;
+    if (obj == NULL || obj->joints == NULL || obj->joints->drawMode == NULL || obj->joints->partCount <= 0) {
+        return 0;
+    }
+    if (obj->joints->parts[0].material == NULL || obj->joints->parts[0].mesh == NULL) {
+        return 0;
+    }
+    if (obj->flags & MAPOBJ_STATIC_TEV_UNSAFE_MASK) {
+        return 0;
+    }
+    return 1;
+}
+
+void portMapDispRunBegin(void) {
+    memset(&sMapRun, 0, sizeof(sMapRun));
+    sMapFast.maskCacheCount = 0;
+    sMapFast.gxLightsValid = FALSE;
+    sMapFast.ambValid = FALSE;
+    sMapRun.active = TRUE;
+}
+
+void portMapDispRunEnd(void) {
+    sMapRun.active = FALSE;
+    sMapRun.fogValid = FALSE;
+    sMapRun.cullValid = FALSE;
+    sMapFast.gxLightsValid = FALSE;
+    sMapFast.ambValid = FALSE;
+    mapDispRunResetMatVcd();
+}
+
+static inline u32 mapPackColor(GXColor c) {
+    return ((u32)c.r << 24) | ((u32)c.g << 16) | ((u32)c.b << 8) | (u32)c.a;
+}
+
+void portMapFillBatchKey(const void* param, u8 renderMode, PortMapBatchKey* out) {
+    const MapObject* a = (const MapObject*)param;
+    const MapJointDrawMode* dma = a->joints->drawMode;
+    const MapMaterial* mata = (const MapMaterial*)a->joints->parts[0].material;
+    const MapFileMesh* mesha = a->joints->parts[0].mesh;
+    u64 dyna = mapObjHasDynamicTev(a, mata) ? 1u : 0u;
+    u64 grp = (u64)(u16)((s32)a->groupIndex + 0x8000);
+    u64 neara = (dma->modeFlags & MAP_DRAWMODE_NEAR_LIGHTS) ? 1u : 0u;
+    u32 foga = (a->flags & MAPOBJ_FLAG_NO_FOG) ? 1u : 0u;
+    u32 nca = (a->flags & MAPOBJ_FLAG_NO_COLOR_STAGE) ? 1u : 0u;
+
+    out->k0 = ((u64)renderMode << 40) | (dyna << 32) | (grp << 16) | neara;
+    out->lightMask = dma->lightMask;
+    out->flags1 = (foga << 8) | nca;
+    out->material = (uintptr_t)mata;
+    out->kc0Packed = mapPackColor(mapCalcLastStageBlendColor(a->flags, a->color, mata->blendColor));
+    out->cullMode = (u32)dma->cullMode;
+    out->elementMask = mesha->elementMask;
+    out->vcdTable = (uintptr_t)mesha->vcdTable;
+    out->partCount = a->joints->partCount;
+}
+
+int portMapCompareBatchEntries(const void* pa, const void* pb) {
+    const MapObject* a = (const MapObject*)pa;
+    const MapObject* b = (const MapObject*)pb;
+    const MapJointDrawMode* dma = a->joints->drawMode;
+    const MapJointDrawMode* dmb = b->joints->drawMode;
+    const MapMaterial* mata = (const MapMaterial*)a->joints->parts[0].material;
+    const MapMaterial* matb = (const MapMaterial*)b->joints->parts[0].material;
+    const MapFileMesh* mesha = a->joints->parts[0].mesh;
+    const MapFileMesh* meshb = b->joints->parts[0].mesh;
+    int dyna = mapObjHasDynamicTev(a, mata) ? 1 : 0;
+    int dynb = mapObjHasDynamicTev(b, matb) ? 1 : 0;
+    u8 neara, nearb;
+    int foga, fogb, nca, ncb;
+    u32 kca, kcb;
+
+    if (dyna != dynb) {
+        return dyna - dynb;
+    }
+    if (a->groupIndex != b->groupIndex) {
+        return (a->groupIndex > b->groupIndex) - (a->groupIndex < b->groupIndex);
+    }
+    neara = (dma->modeFlags & MAP_DRAWMODE_NEAR_LIGHTS) ? 1 : 0;
+    nearb = (dmb->modeFlags & MAP_DRAWMODE_NEAR_LIGHTS) ? 1 : 0;
+    if (neara != nearb) {
+        return (int)neara - (int)nearb;
+    }
+    if (dma->lightMask != dmb->lightMask) {
+        return (dma->lightMask > dmb->lightMask) - (dma->lightMask < dmb->lightMask);
+    }
+    foga = (a->flags & MAPOBJ_FLAG_NO_FOG) ? 1 : 0;
+    fogb = (b->flags & MAPOBJ_FLAG_NO_FOG) ? 1 : 0;
+    if (foga != fogb) {
+        return foga - fogb;
+    }
+    nca = (a->flags & MAPOBJ_FLAG_NO_COLOR_STAGE) ? 1 : 0;
+    ncb = (b->flags & MAPOBJ_FLAG_NO_COLOR_STAGE) ? 1 : 0;
+    if (nca != ncb) {
+        return nca - ncb;
+    }
+    if ((uintptr_t)mata != (uintptr_t)matb) {
+        return ((uintptr_t)mata > (uintptr_t)matb) - ((uintptr_t)mata < (uintptr_t)matb);
+    }
+    kca = mapPackColor(mapCalcLastStageBlendColor(a->flags, a->color, mata->blendColor));
+    kcb = mapPackColor(mapCalcLastStageBlendColor(b->flags, b->color, matb->blendColor));
+    if (kca != kcb) {
+        return (kca > kcb) - (kca < kcb);
+    }
+    if (dma->cullMode != dmb->cullMode) {
+        return (int)dma->cullMode - (int)dmb->cullMode;
+    }
+    if (mesha->elementMask != meshb->elementMask) {
+        return (mesha->elementMask > meshb->elementMask) - (mesha->elementMask < meshb->elementMask);
+    }
+    if ((uintptr_t)mesha->vcdTable != (uintptr_t)meshb->vcdTable) {
+        return ((uintptr_t)mesha->vcdTable > (uintptr_t)meshb->vcdTable) -
+               ((uintptr_t)mesha->vcdTable < (uintptr_t)meshb->vcdTable);
+    }
+    if (a->joints->partCount != b->joints->partCount) {
+        return (a->joints->partCount > b->joints->partCount) - (a->joints->partCount < b->joints->partCount);
+    }
+    return 0;
+}
+#endif

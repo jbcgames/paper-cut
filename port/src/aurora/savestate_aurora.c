@@ -411,6 +411,8 @@ void portSnapQuiesce(int pause) {
         SDL_Delay(1);
     }
     if (pause) {
+        extern void AuroraGXSync(void);
+        AuroraGXSync();
         GXDrawDone(); /* the GPU done reading what a load writes over */
     }
 }

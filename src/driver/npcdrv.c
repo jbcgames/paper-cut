@@ -876,6 +876,10 @@ void PORT_HOOKABLE(npcMain)(void) {
     f32 dist;
     Vec dv;
     Vec dv2;
+    static u8 sAnimDebounce[2][256];
+    static OSTime sAnimDebStart[2][256];
+    const u32 animSetIdx = gp->inBattle ? 1u : 0u;
+    f32 prevMoveDt;
 
     npcwork = gp->inBattle ? &work.battle : &work.field;
 #if VERSION >= VERSION_JP
@@ -905,6 +909,7 @@ void PORT_HOOKABLE(npcMain)(void) {
                 entry->fbatHitCooldown = entry->fbatHitCooldown - 1;
             }
 
+            prevMoveDt = entry->moveDt;
             if (entry->jumpFlags & NPC_STATUS_CLOCK_RUNNING) {
                 entry->dtTicks = gp->renderTime - entry->lastUpdateTicks;
                 if (OSTicksToMilliseconds(entry->dtTicks) > 500) {
@@ -982,22 +987,58 @@ void PORT_HOOKABLE(npcMain)(void) {
                         {
 
                             PSVECSubtract(&entry->position, &entry->prevPosition, &dv);
-                            if (entry->flags & NPC_FLAG_MOVE_ANIM && entry->moveDt > 0.0f) {
-                                f32 spd = sqrtf(dv.x * dv.x + dv.z * dv.z) / entry->moveDt;
+                            if (entry->flags & NPC_FLAG_MOVE_ANIM && entry->moveDt > 0.0f &&
+                                (prevMoveDt > 0.0f || dv.x != 0.0f || dv.z != 0.0f)) {
+                                const f32 spdDt = prevMoveDt > 0.0f ? prevMoveDt : entry->moveDt;
+                                const f32 spd = sqrtf(dv.x * dv.x + dv.z * dv.z) / spdDt;
+                                const f32 runThresh = entry->tribe->runStartSpeed * f30v;
+                                const u32 idx = (u32)(entry - npcwork->entries);
+                                s32 desired = entry->moveAnimState;
+                                if (entry->moveAnimState == 0 && idx < 256) {
+                                    sAnimDebounce[animSetIdx][idx] = 0;
+                                }
                                 if (spd < 0.1f) {
-                                    if (entry->moveAnimState != 1) {
-                                        animPoseSetAnim(entry->poseId, entry->tribe->stayAnim, TRUE);
-                                        entry->moveAnimState = 1;
-                                    }
-                                } else if (spd < entry->tribe->runStartSpeed * f30v) {
-                                    if (entry->moveAnimState != 2) {
-                                        animPoseSetAnim(entry->poseId, entry->tribe->walkAnimation, TRUE);
-                                        entry->moveAnimState = 2;
+                                    desired = 1;
+                                } else if (entry->moveAnimState != 2 && entry->moveAnimState != 3) {
+                                    desired = (spd < runThresh) ? 2 : 3;
+                                } else if (entry->moveAnimState == 2) {
+                                    desired = (spd >= runThresh * 1.15f) ? 3 : 2;
+                                } else {
+                                    desired = (spd < runThresh * 0.80f) ? 2 : 3;
+                                }
+                                if (desired == entry->moveAnimState) {
+                                    if (idx < 256) {
+                                        sAnimDebounce[animSetIdx][idx] = 0;
                                     }
                                 } else {
-                                    if (entry->moveAnimState != 3) {
-                                        animPoseSetAnim(entry->poseId, entry->tribe->runAnimation, TRUE);
-                                        entry->moveAnimState = 3;
+                                    /* Entering motion from stay/unset switches immediately; leaving or
+                                     * toggling walk/run/stay requires >= 4 consecutive ticks AND >= 80ms
+                                     * of renderTime so catch-up tick bursts cannot reset a stride. */
+                                    const s32 needTicks = (entry->moveAnimState <= 1 && desired >= 2) ? 1 : 4;
+                                    s32 switchNow = 0;
+                                    if (idx >= 256 || needTicks == 1) {
+                                        switchNow = 1;
+                                    } else {
+                                        if (sAnimDebounce[animSetIdx][idx] == 0) {
+                                            sAnimDebStart[animSetIdx][idx] = gp->renderTime;
+                                        }
+                                        if (++sAnimDebounce[animSetIdx][idx] >= needTicks &&
+                                            OSTicksToMilliseconds(gp->renderTime - sAnimDebStart[animSetIdx][idx]) >= 80) {
+                                            switchNow = 1;
+                                        }
+                                    }
+                                    if (switchNow) {
+                                        if (idx < 256) {
+                                            sAnimDebounce[animSetIdx][idx] = 0;
+                                        }
+                                        if (desired == 1) {
+                                            animPoseSetAnim(entry->poseId, entry->tribe->stayAnim, TRUE);
+                                        } else if (desired == 2) {
+                                            animPoseSetAnim(entry->poseId, entry->tribe->walkAnimation, entry->moveAnimState <= 1);
+                                        } else {
+                                            animPoseSetAnim(entry->poseId, entry->tribe->runAnimation, entry->moveAnimState <= 1);
+                                        }
+                                        entry->moveAnimState = desired;
                                     }
                                 }
                             }

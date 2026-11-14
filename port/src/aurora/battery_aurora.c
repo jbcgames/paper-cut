@@ -9,15 +9,12 @@
  *    picture stays the last one shown, so 30 a second reach the screen. A
  *    draw-time step that assumes a frame each time (a paper character's
  *    turn, animdrv.c) takes the frames it missed (portDrawFrames).
- *  - the internal resolution is halved (the window's own size counts as its
- *    multiple of 480 lines);
  *  - no in-between frames (the Frame rate setting as 60).
  *
  * The skipped draws change what the drawing code keeps (the game's font
  * takes random numbers per letter drawn), so online play, replays (recording
  * or playing) and $TTYD_FAST runs always draw every frame; so do frame
- * advance and fast-forward. The resolution and frame rate parts are the
- * picture's alone and apply everywhere. */
+ * advance and fast-forward. */
 #include <aurora/aurora.h>
 #include <SDL3/SDL_power.h>
 #include <SDL3/SDL_timer.h>
@@ -31,6 +28,9 @@
 #include "port/speed.h"
 #include "port/toggles.h"
 
+int portDispMustDraw(void); /* dispdrv.c */
+int portViBehindSchedule(void); /* vi_aurora.c */
+
 #define CHECK_MS 5000 /* the power state looked at again */
 
 static int sSaving;
@@ -41,7 +41,8 @@ static unsigned sFrame;
 static int* mode(void) {
     static int* sMode;
     if (sMode == NULL) {
-        sMode = portSettingsDeclare("battery_saver", 0, 0, 2);
+        /* Default 2: target 30 FPS rendered / 60 Hz logic across the entire game. */
+        sMode = portSettingsDeclare("battery_saver", 2, 0, 2);
     }
     return sMode;
 }
@@ -60,10 +61,16 @@ static void update(void) {
         return;
     }
     sNext = now + CHECK_MS;
-    saving = *mode() == 2 || (*mode() == 1 && onBattery());
+    if (getenv("TTYD_NO_MIXED_FPS") != NULL) {
+        saving = 0;
+    } else if (getenv("TTYD_MIXED_FPS") != NULL) {
+        saving = 1;
+    } else {
+        saving = *mode() == 2 || (*mode() == 1 && onBattery());
+    }
     if (saving != sSaving) {
         sSaving = saving;
-        printf("[battery] saver %s\n", saving ? "on" : "off");
+        printf("[battery] 30fps %s\n", saving ? "on" : "off");
         fflush(stdout);
         portSettingsApply();
     }
@@ -75,14 +82,20 @@ int portBatterySaving(void) {
 
 int portBatterySkipDraw(void) {
     static int sFast = -1;
-    int skip;
+    int skip = 0;
     if (sFast < 0) {
         sFast = getenv("TTYD_FAST") != NULL;
     }
     update();
     sFrame++;
-    skip = sSaving && (sFrame & 1) && !sFast && !portLockstep() && !portOnlineActive() && !portReplayActive() &&
-           !portSpeedActive() && !portFrameAdvanceHeld();
+    if (sSaving && sSinceDrawn < 3 && !sFast && !portLockstep() && !portOnlineActive() && !portReplayActive() &&
+        !portSpeedActive() && !portFrameAdvanceHeld() && !portDispMustDraw()) {
+        /* Target 30 FPS across the entire game (field, battle, menus, cutscenes):
+         * always skip at least 1 frame after a drawn frame, and allow a 2nd undrawn
+         * catch-up frame when a heavy drawn frame exceeds 33.3 ms so marioStMain()
+         * logic stays locked at 60 Hz real-time speed. */
+        skip = (sSinceDrawn < 2) || portViBehindSchedule();
+    }
     if (skip) {
         sSinceDrawn++;
     } else {
@@ -106,15 +119,6 @@ const char* portBatteryFramerate(const char* framerate) {
 }
 
 int portBatteryResolution(int resolution) {
-    int scale = resolution;
-    if (!sSaving) {
-        return resolution;
-    }
-    if (scale <= 0) {
-        /* the window's own size: its multiple of 480 lines */
-        const AuroraWindowSize size = aurora_get_window_size();
-        scale = (int)(size.fb_height + 240) / 480;
-    }
-    scale /= 2;
-    return scale < 1 ? 1 : scale;
+    /* Keep full native resolution in 30 FPS mode (do not drop to 0.5x). */
+    return resolution;
 }

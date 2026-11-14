@@ -485,6 +485,7 @@ void mapMain(void);
 void mapDisp(void);
 
 void mapSetMaterialLight(s32 flags, Vec position);
+void mapSetMaterialLightNoFog(s32 flags, Vec position);
 void mapSetMaterialLastStageBlend(s32 flags, GXColor color1, GXColor color2);
 void mapSetMaterialFog(void);
 typedef struct MapTevCallbackInfo {
@@ -559,3 +560,19 @@ void mapSetBlend(GXColor color);
 void mapSetBlend2(GXColor color);
 void spline_getvalue(Vec* out, f32 t, s32 n, Vec* pts, f32* ts, Vec* tbl);
 void spline_maketable(s32 n, Vec* pts, f32* t, Vec* out);
+
+#ifdef TARGET_PC
+typedef struct PortMapBatchKey {
+    u64 k0;
+    u32 lightMask;
+    u32 flags1;
+    uintptr_t material;
+    u32 kc0Packed;
+    u32 elementMask;
+    uintptr_t vcdTable;
+    u32 cullMode;
+    s32 partCount;
+} PortMapBatchKey;
+
+void portMapFillBatchKey(const void* param, u8 renderMode, PortMapBatchKey* out);
+#endif

@@ -76,11 +76,11 @@ const bool sAdded = [] {
                         kPlay, "page_turn", kPages, 4, "page turn transition fade door pipe book fold paper wipe");
 
   // battery saver
-  portSettingsDeclare("battery_saver", 0, 0, 2);
+  portSettingsDeclare("battery_saver", 2, 0, 2);
   static const char* const kBattery[] = {"Off", "On battery", "Always"};
   portSettingsAddChoice("Graphics", "Battery saver",
-                        "Draws 30 frames a second (the game still runs at 60), at half the internal resolution "
-                        "and without in-between frames. Online and in replays every frame is still drawn.",
+                        "Draws 30 frames a second (the game still runs at 60) without in-between frames. "
+                        "Online and in replays every frame is still drawn.",
                         0, "battery_saver", kBattery, 3, "battery saver power laptop steam deck phone 30 fps");
   return true;
 }();
