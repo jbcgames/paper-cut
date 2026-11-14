@@ -76,12 +76,15 @@ Adaptación y optimización de [LLCOOLT/paper-cut](https://github.com/LLCOOLT/pa
   - `__GXShadowCache __gxShadow` protegido por `!aurora::gx::fifo::in_display_list()` y `epoch`.
   - `BakedState::operator==`, máscaras activas de texturas (`BindingSet::activeTexMask` / `useActiveTexMask` y `Shadow::nonEmptyTexMask`), `PassEncoder::m_id` monotónico, `s_fastBindCache` y `s_resolvedDrawBindCache` (512 ranuras).
   - Descartado y eliminado `coalesce_static_dl_draws` tras confirmar que corrompía texturas/geometría en batalla al fusionar display lists con cambios de estado intermedios.
+- **Corrección de glifos omitidos en UI (`"Tiempo"`) y cierre `SIGSEGV` al iniciar partida desde el menú de archivos (`lib/gx/command_processor.cpp`)**:
+  - **Buffers de fusión dedicados (`s_mergedVtxBuf`, `s_mergedIdxBuf`) en `flush_pending_pnmtx_batch()`**: cuando `submit_native_gx_draw` recibía el 11.º glifo consecutivo con matriz trasladada (p. ej. la `'e'` de `"Tiempo 00:04"` / `"Tiempo 00:06"` tras llenar los `MaxPnMtx = 10` slots con `"Nivel 1"` + `"Ti"`), el vaciado automático del lote anterior en `flush_pending_pnmtx_batch()` limpiaba y sobrescribía `s_nativeVtxBuf` y `s_nativeIdxBuf` mientras `vtxPtr` e `idxPtr` seguían apuntando a esos mismos buffers para el 11.º glifo. Separar `s_mergedVtxBuf` y `s_mergedIdxBuf` preserva intactos todos los caracteres.
+  - **Revalidación de `cachedEntry` tras rehash de `s_nativeGeomCache` en `flush_pending_pnmtx_batch()`**: cuando `flush_pending_pnmtx_batch()` promovía un lote fusionado a `s_nativeGeomCache`, `s_nativeGeomCache.emplace(...)` podía rehashear el `absl::flat_hash_map` e invalidar el puntero local `cachedEntry` de `submit_native_gx_draw`, que luego se guardaba en `record_pnmtx_item` con el nuevo `s_nativeGeomPtrEpoch` post-rehash, provocando un `SIGSEGV` en `memcpy` durante el cierre del telón (`disp_maku`) al iniciar partida. Ahora se registra `cachedEntryEpoch` al obtener `cachedEntry` y se re-consulta `s_nativeGeomCache.find(key)` si la época cambió tras `flush_pending_pnmtx_batch()`.
 
 ---
 
-### 2. Verificación multimapa y de combate en RK3326 (`v0.4.2-rk3326`)
+### 2. Verificación multimapa, menú de archivos y combate en RK3326 (`v0.4.2-rk3326`)
 
-Binario Release final limpio (sin hooks de perfilado temporal): `build-aarch64/ttyd-eu.stripped` (`46M`, `SHA256: ea1f5d7c4f73a8f2c641ce38fff25c5c77e0f68c2ba1e96f57f00e2511fa0af9`), desplegado y verificado en `/roms/ports/papercut/ttyd-eu`.
+Binario Release final limpio (sin hooks de perfilado temporal): `build-aarch64/ttyd-eu.stripped` (`46M`, `SHA256: 073d6aea8fb51b0d2f8629727fc75f6a32df66cb8be7ef44ff9d9a1aed1545b7`), desplegado y verificado en `/roms/ports/papercut/ttyd-eu`.
 
 | Ubicación / Escena | Mapa (`story`) | Estado / Salida | Intervalo medio (`mean_iv`) | Mediana (`p50_iv`) | FPS medio | `mean_work` | Verificación visual |
 |---|---|---|---:|---:|---:|---:|---|
