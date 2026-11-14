@@ -101,9 +101,23 @@ Binario Release final limpio (sin hooks de perfilado temporal): `build-aarch64/t
 
 ---
 
+### 3. Cambios y verificaciones de `v0.4.3-rk3326`
+
+- **Menú de pausa simplificado (`src/window/win_root.c`, commit `c676d8ff`)**: eliminadas las 3 últimas pestañas añadidas por el port (`Wardrobe` / Vestuario, `Online` / En línea y `Settings` / Ajustes), dejando únicamente las pestañas originales del juego base.
+- **Selector de idioma en script de lanzamiento (`port/portmaster/papercut/PaperCut.sh`)**:
+  - Nueva variable `GAME_LANGUAGE` en la cabecera del script (`"es"` por defecto; acepta `es`/`4`, `en`/`1`, `de`/`2`, `fr`/`3`, `it`/`5` y `auto`).
+  - Exporta `TTYD_LANGUAGE` y sincroniza `language=<1..5>` en `$TTYD_USER_DIR/settings.txt` (documentado también en `port/portmaster/papercut/README_INSTALACION.txt`).
+  - Verificado en hardware RK3326 cambiando entre `GAME_LANGUAGE="fr"` (`language=3`), `"en"` (`language=1`) y `"es"` (`language=4`) con salida `RC=0` y textos verificados visualmente.
+- **Salto con botón en créditos iniciales hacia la pantalla principal de bienvenida (`src/sequence/seq_logo.c`, `rels/dmo/src/dmo_00.c`)**:
+  - Al pulsar cualquier botón (`A`, `B`, `X`, `Y`, `Start`, `L`, `R`, `Z`) durante los logos iniciales (`case 7..16` / `17`), o `Start` en la pantalla de advertencia inicial (`case 5..6`), el juego omite los logos restantes y la escena `dmo_00` para ir directamente a `SEQ_TITLE`.
+  - Si llega a reproducirse la secuencia inicial `dmo_00`, pulsar `A`, `B`, `X`, `Y` o `Start` salta directamente a `"title"` (`SEQ_TITLE`).
+  - Verificado en hardware RK3326 tanto con `Start` en arranque (`SEQ_TITLE` en 118 frames, `RC=0`) como con `B` durante logos (`SEQ_TITLE` en 39 frames, `RC=0`).
+
+---
+
 ## Instalación en PortMaster (desde el paquete Release)
 
-1. Descarga `papercut-0.4.2-rk3326-portmaster.zip` desde la sección **Releases** de este repositorio.
+1. Descarga `papercut-0.4.3-rk3326-portmaster.zip` desde la sección **Releases** de este repositorio.
 2. Descomprime su contenido en la carpeta de puertos de tu consola (`/roms/ports/`), de modo que queden:
    - `/roms/ports/Paper Cut.sh`
    - `/roms/ports/papercut/PaperCut.sh`, `ttyd-eu`, `papercut.gptk`, `libs.aarch64/`, `Logo*.jpg`, `saves/settings.txt`

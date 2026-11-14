@@ -15,4 +15,10 @@ INSTALACION:
    (La primera ejecucion tardara unos segundos mientras genera la cache de shaders.)
 
 IDIOMA:
-Configurado por defecto en espanol (language=4 en papercut/saves/settings.txt).
+Configurado por defecto en espanol (GAME_LANGUAGE="es" en papercut/PaperCut.sh y language=4 en papercut/saves/settings.txt).
+Para cambiar entre los idiomas de la version europea (G8MP01), edita GAME_LANGUAGE al inicio de papercut/PaperCut.sh:
+  "es" (o 4) = Espanol
+  "en" (o 1) = English
+  "de" (o 2) = Deutsch
+  "fr" (o 3) = Francais
+  "it" (o 5) = Italiano

@@ -610,7 +610,11 @@ EVT_BEGIN(buttonCheck)
     CALL(evt_fade_end_wait)
     LOOP(0)
         CALL(evt_key_get_buttontrg, 0, LW(0))
+#ifdef TARGET_PC
+        IF_BITS_SET(LW(0), PAD_BUTTON_A | PAD_BUTTON_B | PAD_BUTTON_X | PAD_BUTTON_Y | PAD_BUTTON_START)
+#else
         IF_BITS_SET(LW(0), PAD_BUTTON_A | PAD_BUTTON_START)
+#endif
             SET_VALUE(GF(10), 1)
             CALL(evt_fade_set_mapchange_type, 1, FADE_OUT_WHITE, 500, -1, -1)
             CALL(evt_seq_set_seq, SEQ_MAP_CHANGE, STRING("title"), 0)

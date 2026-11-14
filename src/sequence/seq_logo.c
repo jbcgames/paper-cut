@@ -26,6 +26,9 @@
 #ifdef TARGET_PC
 #include "port/bedecode.h"
 #include "port/gameplay.h"
+#define PORT_LOGO_SKIP_BTNS \
+    (PAD_BUTTON_A | PAD_BUTTON_B | PAD_BUTTON_X | PAD_BUTTON_Y | PAD_BUTTON_START | PAD_TRIGGER_L | PAD_TRIGGER_R | \
+     PAD_TRIGGER_Z)
 #endif
 #include "libc_decls.h"
 #ifdef PORT_MODS
@@ -469,6 +472,13 @@ void PORT_HOOKABLE(seq_logoMain)(SequenceWork* work) {
     static OSTime time;
 #ifdef TARGET_PC
     portIntroFrame(); /* PC port: "Skip the intro" fast-forwards the logos */
+    /* PC port: pressing a button during the opening logos/credits skips straight to the title screen */
+    if (((work->state >= 7 && work->state < 17) && (keyGetButtonTrg(0) & PORT_LOGO_SKIP_BTNS)) ||
+        ((work->state >= 5 && work->state <= 6) && (keyGetButtonTrg(0) & PAD_BUTTON_START))) {
+        wp->skipStory = TRUE;
+        fadeEntry(FADE_OUT_BLACK, 150, (GXColor){0, 0, 0, 0xFF});
+        work->state = 17;
+    }
 #endif
 
     switch (work->state) {
@@ -609,7 +619,11 @@ void PORT_HOOKABLE(seq_logoMain)(SequenceWork* work) {
             break;
 
         case 17:
+#ifdef TARGET_PC
+            if (keyGetButtonTrg(0) & PORT_LOGO_SKIP_BTNS) {
+#else
             if (keyGetButtonTrg(0) & (PAD_BUTTON_START | PAD_BUTTON_A)) {
+#endif
                 wp->skipStory = TRUE;
             }
             if ((u32)psndPushGroup() == 0U) {

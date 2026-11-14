@@ -4,6 +4,18 @@
 # Target: Rockchip RK3326 / Mali-G31 MP2 / OpenGL ES 3.0 / KMSDRM
 # =============================================================================
 
+# =============================================================================
+# 0. SELECTOR DE IDIOMA / LANGUAGE SELECTOR (Version Europea G8MP01)
+#    Indica el idioma deseado en GAME_LANGUAGE:
+#      es (o 4) -> Espanol  [por defecto]
+#      en (o 1) -> English  (Ingles)
+#      de (o 2) -> Deutsch  (Aleman)
+#      fr (o 3) -> Francais (Frances)
+#      it (o 5) -> Italiano
+#      auto     -> Usa saves/settings.txt o el idioma del sistema
+# =============================================================================
+GAME_LANGUAGE="es"
+
 # Pre-kill any stale instances to ensure DRM master and inputs are completely free
 sudo killall -9 ttyd-eu gptokeyb gptokeyb2 2>/dev/null || true
 
@@ -275,7 +287,43 @@ export TTYD_DISC="$DISC_PATH"
 export TTYD_GPU="opengles"
 export TTYD_MSAA=0
 export TTYD_CACHE_DIR="$GAMEDIR/cache"
-export TTYD_USER_DIR="$GAMEDIR/saves"
+export TTYD_USER_DIR="${TTYD_USER_DIR:-$GAMEDIR/saves}"
+mkdir -p "$TTYD_USER_DIR"
+
+# Apply European (G8MP01) language selection from GAME_LANGUAGE
+LANG_RAW=$(printf '%s' "${GAME_LANGUAGE:-es}" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')
+LANG_CODE=""
+SETTINGS_LANG=""
+case "$LANG_RAW" in
+  1|en|eng|english)
+    LANG_CODE="en"; SETTINGS_LANG="1" ;;
+  2|de|deu|ger|german|deutsch)
+    LANG_CODE="de"; SETTINGS_LANG="2" ;;
+  3|fr|fra|fre|french|francais|français)
+    LANG_CODE="fr"; SETTINGS_LANG="3" ;;
+  4|es|esp|spa|spanish|espanol|español)
+    LANG_CODE="es"; SETTINGS_LANG="4" ;;
+  5|it|ita|italian|italiano)
+    LANG_CODE="it"; SETTINGS_LANG="5" ;;
+  auto|"")
+    unset TTYD_LANGUAGE ;;
+  *)
+    echo "[lang] WARNING: Unknown GAME_LANGUAGE='$GAME_LANGUAGE', falling back to 'es' (Spanish)"
+    LANG_CODE="es"; SETTINGS_LANG="4" ;;
+esac
+
+if [ -n "$LANG_CODE" ]; then
+  export TTYD_LANGUAGE="$LANG_CODE"
+  echo "[lang] Selected EU language: $LANG_CODE (GAME_LANGUAGE=$GAME_LANGUAGE -> language=$SETTINGS_LANG)"
+  SETTINGS_FILE="$TTYD_USER_DIR/settings.txt"
+  if [ -f "$SETTINGS_FILE" ]; then
+    if grep -q '^language=' "$SETTINGS_FILE" 2>/dev/null; then
+      sed -i "s/^language=.*/language=$SETTINGS_LANG/" "$SETTINGS_FILE" 2>/dev/null || true
+    else
+      printf 'language=%s\n' "$SETTINGS_LANG" >> "$SETTINGS_FILE" 2>/dev/null || true
+    fi
+  fi
+fi
 
 # =============================================================================
 # 7. EXECUTION
