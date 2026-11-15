@@ -115,9 +115,17 @@ Binario Release final limpio (sin hooks de perfilado temporal): `build-aarch64/t
 
 ---
 
+### 4. `v0.4.4-rk3326` (solución temporal)
+
+- **Corrige el cierre `unknown opcode 0x6A` al cargar partidas** (`src/driver/animdrv.c`): antes de reutilizar el descriptor de vértices en caché de un modelo animado se comprueba el estado real de GX con `GXGetVtxDesc`, y se reinicializa si otro dibujo lo cambió. También se invalida `lastVtxFmt` al cambiar `VCD`/`VAT` (`extern/aurora`).
+- Verificado en RK3326: cargar el Archivo 2 llega a `SEQ_GAME` y sigue 300 frames sin cierre.
+- **Problema conocido**: en la zona del final del Acto 1 (caras de Mario / intervención de Peach) siguen existiendo fallos gráficos graves. No se probó esa escena tras el cambio. Esta versión es una solución temporal para evitar el cierre.
+
+---
+
 ## Instalación en PortMaster (desde el paquete Release)
 
-1. Descarga `papercut-0.4.3-rk3326-portmaster.zip` desde la sección **Releases** de este repositorio.
+1. Descarga `papercut-0.4.4-rk3326-portmaster.zip` desde la sección **Releases** de este repositorio.
 2. Descomprime su contenido en la carpeta de puertos de tu consola (`/roms/ports/`), de modo que queden:
    - `/roms/ports/Paper Cut.sh`
    - `/roms/ports/papercut/PaperCut.sh`, `ttyd-eu`, `papercut.gptk`, `libs.aarch64/`, `Logo*.jpg`, `saves/settings.txt`
