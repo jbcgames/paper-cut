@@ -6240,6 +6240,21 @@ static void renderProc(s32 shapeId, s32 unused) {
                 clr0Le = clrBase ? (!portGXIsDiscData(clrBase) ? 2 : 0) : 0;
                 texLe = data->texVtxBuffer ? (!portGXIsDiscData(data->texVtxBuffer) ? 2 : 0) : 0;
                 if (sAnimPoseVcdCanReuse && sAnimPoseVcdActive) {
+                    /* Some group of this pose may have drawn with its own vertex
+                     * descriptor (any other GX draw code in between); only reuse the
+                     * cached one when the live GX state is still the one we left. */
+                    GXAttrType vcdPnmtx, vcdPos, vcdNrm, vcdClr, vcdTex0;
+                    GXGetVtxDesc(GX_VA_PNMTXIDX, &vcdPnmtx);
+                    GXGetVtxDesc(GX_VA_POS, &vcdPos);
+                    GXGetVtxDesc(GX_VA_NRM, &vcdNrm);
+                    GXGetVtxDesc(GX_VA_CLR0, &vcdClr);
+                    GXGetVtxDesc(GX_VA_TEX0, &vcdTex0);
+                    if (vcdPnmtx != GX_NONE || vcdPos != GX_INDEX16 || vcdNrm != GX_INDEX16 ||
+                        vcdClr != GX_INDEX16 || vcdTex0 != (sAnimPosePrevTc2 > 0 ? GX_INDEX16 : GX_NONE)) {
+                        sAnimPoseVcdActive = 0;
+                    }
+                }
+                if (sAnimPoseVcdCanReuse && sAnimPoseVcdActive) {
                     prevTc2 = sAnimPosePrevTc2;
                     prevTexLe = sAnimPosePrevTexLe;
                     memcpy(prevTexPtr, sAnimPosePrevTexPtr, sizeof(prevTexPtr));
