@@ -260,6 +260,7 @@ static BOOL mapObjHasDynamicTev(const MapObject* obj, const MapMaterial* mat) {
 }
 
 static GXColor mapCalcLastStageBlendColor(s32 flags, GXColor color1, GXColor color2);
+void portMapDispRunBegin(void);
 void portMapDispRunEnd(void);
 #endif
 s32 activeGroup;
@@ -2430,6 +2431,17 @@ static void _mapDispMapObj(CameraId cam, MapObject* obj) {
     void* material;
     camera = camGetPtr(cam);
     current_mp = obj;
+#ifdef TARGET_PC
+    if (obj->joints->partCount <= 0) {
+        return;
+    }
+    if ((obj->flags & MAPOBJ_FLAG_IN_GROUP) &&
+        ((obj->flags & MAPOBJ_FLAG_DISABLE) ||
+         ((obj->flags & MAPOBJ_FLAG_HIDE) && !(obj->flags & MAPOBJ_FLAG_OFFSCREEN)) ||
+         ((obj->flags & MAPOBJ_FLAG_COLOR_ALPHA) && obj->color.a == 0))) {
+        return;
+    }
+#endif
     if (obj->flags & MAPOBJ_FLAG_IN_GROUP) {
         if (obj->flags & MAPOBJ_FLAG_DEPTH_BIAS) {
             n = 0;
@@ -2707,7 +2719,19 @@ static void mapDispMapObj(CameraId cam, MapObject* obj) {
 
 /** dispdrv callback that draws a group map object and its members (queued by mapDisp). */
 static void mapDispMapGrp(CameraId cam, MapObject* obj) {
+#ifdef TARGET_PC
+    BOOL startedRun = FALSE;
+    if (!sMapRun.active) {
+        portMapDispRunBegin();
+        startedRun = TRUE;
+    }
     _mapDispMapGrp(cam, obj);
+    if (startedRun) {
+        portMapDispRunEnd();
+    }
+#else
+    _mapDispMapGrp(cam, obj);
+#endif
 }
 
 /**

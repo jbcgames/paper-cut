@@ -386,6 +386,29 @@ void extPoseDraw(s32 index) {
     }
 }
 
+#ifdef TARGET_PC
+static inline int extPointInFrustum(const CameraEntry* cam, f32 farLim, f32 tanX, f32 tanY, f32 px, f32 py, f32 pz) {
+    const f32 (*v)[4] = cam->view;
+    f32 vz = v[2][0] * px + v[2][1] * py + v[2][2] * pz + v[2][3];
+    f32 depth, vx, mx, vy, my;
+    if (vz > 100.0f || vz < farLim) {
+        return 0;
+    }
+    depth = (vz < 0.0f) ? -vz : 0.0f;
+    vx = v[0][0] * px + v[0][1] * py + v[0][2] * pz + v[0][3];
+    mx = depth * tanX + 120.0f;
+    if (vx > mx || vx < -mx) {
+        return 0;
+    }
+    vy = v[1][0] * px + v[1][1] * py + v[1][2] * pz + v[1][3];
+    my = depth * tanY + 120.0f;
+    if (vy > my || vy < -my) {
+        return 0;
+    }
+    return 1;
+}
+#endif
+
 /**
  * Draws every visible pose in sorted order, reloading the texture only when it changes;
  * the caller loads the render, vertex, texture and TEV setup first.
@@ -401,7 +424,79 @@ void extDraw(void) {
 
 #ifdef TARGET_PC
     portInterpKeep(&wp->curTex, sizeof(wp->curTex)); /* as in extPoseDraw */
-#endif
+    {
+        const CameraEntry* cam = camGetCurPtr();
+        const int isPersp = (cam->projType == GX_PERSPECTIVE);
+        const f32 farLim = -(cam->far + 200.0f);
+        const f32 tanX = (cam->projection[0][0] > 0.01f) ? (1.6f / cam->projection[0][0]) : 1.5f;
+        const f32 tanY = (cam->projection[1][1] > 0.01f) ? (1.25f / cam->projection[1][1]) : 1.0f;
+        ExtdrvPose* batch[64];
+        s32 batchN = 0;
+        s32 batchTex = -1;
+        s32 k;
+
+        GXLoadPosMtxImm((MtxPtr)cam->view, 0);
+        GXSetCurrentMtx(0);
+        GXClearVtxDesc();
+        GXSetVtxDesc(GX_VA_POS, GX_DIRECT);
+        GXSetVtxDesc(GX_VA_TEX0, GX_DIRECT);
+        GXSetVtxAttrFmt(GX_VTXFMT0, GX_VA_POS, GX_POS_XYZ, GX_F32, 0);
+        GXSetVtxAttrFmt(GX_VTXFMT0, GX_VA_TEX0, GX_TEX_ST, GX_F32, 0);
+
+        for (i = 0, sort = wp->sort; i <= wp->poseNum; i++, sort++) {
+            int emitBatch = 0;
+            if (i < wp->poseNum) {
+                pose = &wp->poses[sort->index];
+                if (!(pose->flags & EXT_POSE_FLAG_ACTIVE)) {
+                    continue;
+                }
+                if (isPersp) {
+                    const f32 (*m)[4] = *pose->mtx;
+                    if (!extPointInFrustum(cam, farLim, tanX, tanY, m[0][3], m[1][3], m[2][3])) {
+                        continue;
+                    }
+                }
+                texId = pose->texId;
+                if (batchN > 0 && (texId != batchTex || batchN == 64)) {
+                    emitBatch = 1;
+                }
+            } else if (batchN > 0) {
+                emitBatch = 1;
+            }
+
+            if (emitBatch) {
+                const f32* vtx = &wp->vtx[batchTex * 12];
+                if (batchTex != wp->curTex) {
+                    tex = &wp->texs[batchTex];
+                    GXLoadTexObjPreLoaded(smartTexObj(&tex->obj, tex->image), &tex->region, GX_TEXMAP0);
+                    wp->curTex = batchTex;
+                }
+                GXBegin(GX_QUADS, GX_VTXFMT0, (u16)(batchN * 4));
+                for (k = 0; k < batchN; k++) {
+                    const f32 (*m)[4] = *batch[k]->mtx;
+                    s32 c;
+                    for (c = 0; c < 4; c++) {
+                        const f32* lc = &vtx[c * 3];
+                        f32 wx = m[0][0] * lc[0] + m[0][1] * lc[1] + m[0][2] * lc[2] + m[0][3];
+                        f32 wy = m[1][0] * lc[0] + m[1][1] * lc[1] + m[1][2] * lc[2] + m[1][3];
+                        f32 wz = m[2][0] * lc[0] + m[2][1] * lc[1] + m[2][2] * lc[2] + m[2][3];
+                        GXPosition3f32(wx, wy, wz);
+                        GXTexCoord2f32((c == 1 || c == 2) ? 1.0f : 0.0f, (c >= 2) ? 1.0f : 0.0f);
+                    }
+                }
+                GXEnd();
+                batchN = 0;
+            }
+            if (i < wp->poseNum) {
+                batchTex = texId;
+                batch[batchN++] = pose;
+            }
+        }
+        extLoadVertex();
+        (void)mtx;
+        return;
+    }
+#else
     for (i = wp->poseNum - 1, sort = wp->sort; i >= 0; i--, sort++) {
         pose = &wp->poses[sort->index];
         if (pose->flags & EXT_POSE_FLAG_ACTIVE) {
@@ -417,6 +512,7 @@ void extDraw(void) {
             GXCallDisplayList(wp->dl[texId], wp->dlSize[texId]);
         }
     }
+#endif
 }
 
 /** Sets the alpha-tested, depth-writing render mode the crowd sprites draw with. */
@@ -455,7 +551,9 @@ void extLoadTexture(void) {
     u32 offset = 0;
     u32 size;
 
+#ifndef TARGET_PC
     GXInvalidateTexAll();
+#endif
     for (i = 0; i < wp->texNum; i++, tex++) {
         size = GXGetTexBufferSize(GXGetTexObjWidth(&tex->obj), GXGetTexObjHeight(&tex->obj),
                                   GXGetTexObjFmt(&tex->obj), GX_FALSE, 0);
@@ -571,11 +669,27 @@ void extDrawShadow(void) {
     ExtdrvSort* sort;
     ExtdrvPose* pose;
     Mtx mtx;
+#ifdef TARGET_PC
+    const CameraEntry* cam = camGetCurPtr();
+    const int isPersp = (cam->projType == GX_PERSPECTIVE);
+    const f32 farLim = -(cam->far + 200.0f);
+    const f32 tanX = (cam->projection[0][0] > 0.01f) ? (1.6f / cam->projection[0][0]) : 1.5f;
+    const f32 tanY = (cam->projection[1][1] > 0.01f) ? (1.25f / cam->projection[1][1]) : 1.0f;
+#endif
 
     sort = &wp->sort[wp->poseNum - 1];
     for (i = wp->poseNum - 1; i >= 0; i--, sort--) {
         pose = &wp->poses[sort->index];
         if (!(pose->flags & EXT_POSE_FLAG_NO_SHADOW)) {
+#ifdef TARGET_PC
+            if (isPersp) {
+                const f32 (*m)[4] = *pose->mtx;
+                f32 py = (pose->flags & EXT_POSE_FLAG_SHADOW_Y) ? pose->shadowY : m[1][3];
+                if (!extPointInFrustum(cam, farLim, tanX, tanY, m[0][3], py, m[2][3])) {
+                    continue;
+                }
+            }
+#endif
             PSMTXConcat(camGetCurPtr()->view, *pose->mtx, mtx);
             PSMTXConcat(mtx, wp->shadowMtx, mtx);
             if (pose->flags & EXT_POSE_FLAG_SHADOW_Y) {

@@ -86,7 +86,12 @@ static inline void bgLoad(BackgroundWork* bgwork, const char* filename) {
             bgwork->color = (GXColor){0xFF, 0xFF, 0xFF, 0xFF};
         } else {
             bgwork->flags |= BG_FLAT_COLOR;
+#ifdef TARGET_PC
+            /* On missing ./b/<map>.tpl (e.g. sys_00, muj_10, muj_20), fall back to black instead of debug green. */
+            bgwork->multiply = (GXColor){0x00, 0x00, 0x00, 0xFF};
+#else
             bgwork->multiply = (GXColor){0x00, 0xFF, 0x00, 0xFF};
+#endif
             bgwork->flags |= BG_RENDERING;
             bgwork->color = (GXColor){0xFF, 0xFF, 0xFF, 0xFF};
         }

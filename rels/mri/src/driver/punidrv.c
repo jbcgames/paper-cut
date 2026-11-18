@@ -273,6 +273,12 @@ void puniMain(void) {
     for (i = wp->poseNum - 1; i >= 0; i--, pose++, sort++) {
         flags = pose->flags;
         sort->index = i;
+#ifdef TARGET_PC
+        if ((*pose->mtx)[1][3] <= -999.0f) {
+            sort->z = -100000.0f;
+            continue;
+        }
+#endif
         if (flags & 1) {
             sort->z = pose->texId;
         }
@@ -386,6 +392,11 @@ void puniDraw(void) {
     for (i = wp->poseNum - 1, sort = wp->sort; i >= 0; i--, sort++) {
         pose = &wp->poses[sort->index];
         if (pose->flags & 1) {
+#ifdef TARGET_PC
+            if ((*pose->mtx)[1][3] <= -999.0f) {
+                continue;
+            }
+#endif
             texId = pose->texId;
             if (texId != wp->curTex) {
                 tex = &wp->texs[texId];
@@ -446,7 +457,9 @@ void puniLoadTexture(void) {
     u32 offset = 0;
     u32 size;
 
+#ifndef TARGET_PC
     GXInvalidateTexAll();
+#endif
     for (i = 0; i < wp->texNum; i++, tex++) {
         size = GXGetTexBufferSize(GXGetTexObjWidth(&tex->obj), GXGetTexObjHeight(&tex->obj),
                                   GXGetTexObjFmt(&tex->obj), GX_FALSE, 0);

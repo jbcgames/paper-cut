@@ -1841,6 +1841,54 @@ static USER_FUNC(evt_rsh_get_rnd_npc) {
  * when the box is empty.
  */
 static void rsh_window_tev(MapTevCallbackInfo* info) {
+#ifdef TARGET_PC
+    {
+        static u8 sRshWinBuf[320 * 240 * 2] ATTRIBUTE_ALIGN(32);
+        static u32 sRshWinFrame = 0xFFFFFFFFu;
+        GXTevStageID tevStage = info->tevStage;
+        GXTexMapID texMap = info->texCoord;
+        GXTexCoordID texCoord = info->texMap;
+        int indStage = info->indStage;
+        s32 width = gp->fbWidth;
+        s32 height = gp->efbHeight;
+        s32 halfWidth = width / 2;
+        s32 halfHeight = height / 2;
+        GXTexObj tex;
+        Mtx mtx;
+        f32 t;
+
+        if (sRshWinFrame != gp->retraceCount) {
+            sRshWinFrame = gp->retraceCount;
+            GXSetTexCopySrc(0, 0, width, height);
+            GXSetTexCopyDst(halfWidth, halfHeight, GX_TF_RGB5A3, GX_TRUE);
+            GXCopyTex(sRshWinBuf, GX_FALSE);
+            GXPixModeSync();
+            GXTexModeSync();
+        }
+        GXInitTexObj(&tex, sRshWinBuf, halfWidth, halfHeight, GX_TF_RGB5A3, GX_CLAMP, GX_CLAMP, GX_FALSE);
+        GXInitTexObjLOD(&tex, GX_NEAR, GX_NEAR, 0.0f, 0.0f, 0.0f, GX_FALSE, GX_FALSE, GX_ANISO_1);
+        t = tan(6.2831855f * (camGetPtr(CAMERA_3D)->fovY / 2.0f) / 360.0f);
+        C_MTXLightFrustum(mtx, -height / 2.0f, height / 2.0f, -width / 2.0f,
+                          width / 2.0f, height / 2.0f / t, 0.5f, 0.5f, 0.4f, 0.6f);
+        PSMTXConcat(mtx, camGetCurPtr()->view, mtx);
+        PSMTXConcat(mtx, info->mtx, mtx);
+        GXSetTexCoordGen2(texCoord, GX_TG_MTX3x4, GX_TG_POS, texmtx_tbl[texMap], GX_FALSE, GX_PTIDENTITY);
+        GXLoadTexMtxImm(mtx, texmtx_tbl[texMap], GX_MTX3x4);
+        GXLoadTexObj(&tex, texMap);
+        GXSetTevOrder(tevStage, texCoord, texMap, GX_COLOR_NULL);
+        GXSetTevColorOp(tevStage, GX_TEV_ADD, GX_TB_ZERO, GX_CS_SCALE_1, GX_TRUE, GX_TEVPREV);
+        GXSetTevAlphaOp(tevStage, GX_TEV_ADD, GX_TB_ZERO, GX_CS_SCALE_1, GX_TRUE, GX_TEVPREV);
+        GXSetTevColorIn(tevStage, GX_CC_ZERO, GX_CC_TEXC, GX_CC_KONST, GX_CC_ZERO);
+        GXSetTevAlphaIn(tevStage, GX_CA_ZERO, GX_CA_ZERO, GX_CA_ZERO, GX_CA_APREV);
+        GXSetTevSwapMode(tevStage, GX_TEV_SWAP0, GX_TEV_SWAP0);
+        GXSetTevKColorSel(tevStage, GX_TEV_KCSEL_3_4);
+        info->tevStage = tevStage + 1;
+        info->texMap = texCoord + 1;
+        info->indStage = indStage;
+        info->texCoord = texMap + 1;
+        return;
+    }
+#endif
     MapObject* p;
     u32 flags;
     GXTevStageID tevStage;

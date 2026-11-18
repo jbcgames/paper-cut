@@ -239,6 +239,11 @@ void DVDMgrReadAsync(DVDEntry* entry, void* address, u32 size, s32 offset, DVDCa
 
 /** Marks the entry for closing; the DVD thread closes the file and frees the entry on its next pass. */
 void DVDMgrClose(DVDEntry* entry) {
+#ifdef TARGET_PC
+    if (!entry) {
+        return;
+    }
+#endif
     entry->status |= DVDMGR_CLOSED;
 }
 

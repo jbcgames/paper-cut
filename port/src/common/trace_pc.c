@@ -13,10 +13,14 @@
 #include "port/open_world.h"
 #include "mario/mario_party.h"
 #include "event.h"
+#include "driver/fadedrv.h"
 #include "port/platform.h"
 #include "port/gameplus.h"
 #include "port/toggles.h"
 #include "port/practice.h"
+#ifdef TTYD_BACKEND_AURORA
+#include "port/display.h"
+#endif
 
 /* $TTYD_TRACE=2: every running script, where it is and what it calls. */
 static void traceEvents(u32 frame) {
@@ -213,9 +217,261 @@ void portTraceMsgMissing(const char* tag) {
     fflush(stdout);
 }
 
+/* $TTYD_SWEEP_FILE=<path>: sequentially warp through <map>,<bero>,<story> entries
+ * in one run, optionally capturing screenshots ($TTYD_SWEEP_SHOT_DIR/<map>.png) and
+ * reporting steady-state frame timing per scene. */
+#define SWEEP_MAX_ENTRIES 320
+typedef struct SweepEntry {
+    char map[32];
+    char bero[32];
+    s32 story;
+} SweepEntry;
+
+static int cmpFloatAsc(const void* a, const void* b) {
+    float fa = *(const float*)a, fb = *(const float*)b;
+    return (fa > fb) - (fa < fb);
+}
+
+static void sweepFrame(void) {
+    static int state = -1; /* -1 unread, 0 off, 1 ready/starting next, 2 loading, 3 running on map, 4 shot wait */
+    static SweepEntry entries[SWEEP_MAX_ENTRIES];
+    static int total = 0, idx = 0;
+    static u32 exitFrames = 90, waitFrames = 0, onMapFrames = 0;
+    static const char* shotDir = NULL;
+    static time_t loadStart = 0;
+
+    if (state < 0) {
+        const char* path = getenv("TTYD_SWEEP_FILE");
+        const char* v;
+        state = 0;
+        if (path && *path) {
+            FILE* f = fopen(path, "r");
+            if (!f) {
+                fprintf(stderr, "[sweep] FAIL: cannot open %s\n", path);
+                _Exit(2);
+            }
+            char line[128];
+            while (total < SWEEP_MAX_ENTRIES && fgets(line, sizeof(line), f)) {
+                char* hash = strchr(line, '#');
+                char* p1;
+                char* p2;
+                if (hash) *hash = '\0';
+                line[strcspn(line, "\r\n")] = '\0';
+                if (!line[0]) continue;
+                p1 = strchr(line, ',');
+                p2 = p1 ? strchr(p1 + 1, ',') : NULL;
+                SweepEntry* e = &entries[total++];
+                memset(e, 0, sizeof(*e));
+                if (p1) {
+                    snprintf(e->map, sizeof(e->map), "%.*s", (int)(p1 - line), line);
+                    if (p2) {
+                        snprintf(e->bero, sizeof(e->bero), "%.*s", (int)(p2 - (p1 + 1)), p1 + 1);
+                        e->story = atoi(p2 + 1);
+                    } else {
+                        snprintf(e->bero, sizeof(e->bero), "%s", p1 + 1);
+                    }
+                } else {
+                    snprintf(e->map, sizeof(e->map), "%s", line);
+                }
+            }
+            fclose(f);
+            if ((v = getenv("TTYD_EXIT_FRAMES")) && atoi(v) > 0) {
+                exitFrames = (u32)atoi(v);
+            }
+            shotDir = getenv("TTYD_SWEEP_SHOT_DIR");
+            state = total > 0 ? 1 : 0;
+        }
+    }
+    if (state == 0 || gp == NULL) {
+        return;
+    }
+
+    if (state == 1) {
+        if (idx == 0 && seqGetSeq() != SEQ_TITLE && seqGetSeq() != SEQ_GAME) {
+            return;
+        }
+        if (idx >= total) {
+            printf("[sweep:all_done] total=%d\n", total);
+            fflush(stdout);
+            _Exit(0);
+        }
+        {
+            const SweepEntry* e = &entries[idx];
+            FILE* cf = fopen("/tmp/ttyd_sweep_cur.txt", "w");
+            if (cf) {
+                fprintf(cf, "%s\n", e->map);
+                fclose(cf);
+            }
+            printf("[sweep:enter] idx=%d/%d map=%s bero=%s story=%d\n", idx + 1, total, e->map, e->bero,
+                   (int)e->story);
+            fflush(stdout);
+
+            stg0_00_init();
+            marioPartyKill();
+            swInit();
+            swByteSet(0, e->story);
+            if (e->story > 0 && strncmp(e->map, "kpa_", 4) != 0 && strncmp(e->map, "sys_", 4) != 0 &&
+                strncmp(e->map, "dmo_", 4) != 0 && strncmp(e->map, "dig_", 4) != 0 &&
+                strncmp(e->map, "end_", 4) != 0) {
+                partyJoin(1);
+                marioPartyEntry(1);
+            }
+            seqSetSeq(SEQ_MAP_CHANGE, (char*)e->map, e->bero[0] ? (char*)e->bero : NULL);
+            waitFrames = 0;
+            loadStart = time(NULL);
+            state = 2;
+        }
+        return;
+    }
+
+    if (state == 2) {
+        const SequenceType s = seqGetSeq();
+        waitFrames++;
+        if (waitFrames >= 5 && s != SEQ_MAP_CHANGE && s != SEQ_LOGO && s != SEQ_TITLE) {
+            onMapFrames = 0;
+            state = 3;
+            return;
+        }
+        if (time(NULL) - loadStart >= 25) {
+            const SweepEntry* e = &entries[idx];
+            printf("[sweep:timeout] map=%s seq=%d cur='%.*s'\n", e->map, (int)s,
+                   (int)sizeof(gp->currentMapName), gp->currentMapName);
+            fflush(stdout);
+            _Exit(3);
+        }
+        return;
+    }
+
+    if (state == 3) {
+        const SweepEntry* e = &entries[idx];
+        onMapFrames++;
+        if (onMapFrames >= exitFrames) {
+            float fps = 0.0f, mean_iv = 0.0f, p50_iv = 0.0f, mean_work = 0.0f, max_work = 0.0f;
+#ifdef TTYD_BACKEND_AURORA
+            float iv[40], wk[40], sorted_iv[40];
+            int want = onMapFrames < 40 ? (int)onMapFrames : 40;
+            int n = portPerfSamples(iv, wk, want);
+            if (n > 0) {
+                int i;
+                for (i = 0; i < n; i++) {
+                    mean_iv += iv[i];
+                    sorted_iv[i] = iv[i];
+                    mean_work += wk[i];
+                    if (wk[i] > max_work) max_work = wk[i];
+                }
+                mean_iv /= (float)n;
+                mean_work /= (float)n;
+                qsort(sorted_iv, (size_t)n, sizeof(float), cmpFloatAsc);
+                p50_iv = sorted_iv[n / 2];
+                if (mean_iv > 0.01f) fps = 1000.0f / mean_iv;
+            }
+#endif
+            printf("[sweep:done] map=%s active_map=%.*s seq=%d fps=%.2f mean_iv=%.2f p50_iv=%.2f mean_work=%.2f max_work=%.2f\n",
+                   e->map, (int)sizeof(gp->currentMapName), gp->currentMapName, (int)seqGetSeq(), fps, mean_iv, p50_iv,
+                   mean_work, max_work);
+            fflush(stdout);
+            if (shotDir && *shotDir) {
+                FILE* rf = fopen("/tmp/ttyd_screenshot.req", "w");
+                if (rf) {
+                    fprintf(rf, "%s/%s.ppm\n", shotDir, e->map);
+                    fclose(rf);
+                }
+                state = 4;
+                return;
+            }
+            idx++;
+            state = 1;
+        }
+        return;
+    }
+
+    if (state == 4) {
+        idx++;
+        state = 1;
+    }
+}
+
+/* $TTYD_TEST_ACT1_END=1: reproduce gon_11 Act 1 end -> FADE_OUT_WHITE -> FADE_STORY_MARIO_A1/A3 -> aji_10
+ * (peach_evt_stg1) and capture rapid .ppm screenshots in $TTYD_ACT1_SHOT_DIR (default /tmp/act1_shots). */
+static void testAct1EndFrame(void) {
+    static int state = -1;
+    static const char* shotDir = NULL;
+    static u32 ticks = 0;
+    static u32 shotIdx = 0;
+
+    if (state < 0) {
+        const char* v = getenv("TTYD_TEST_ACT1_END");
+        state = (v && atoi(v) != 0) ? 1 : 0;
+        shotDir = getenv("TTYD_ACT1_SHOT_DIR");
+        if (!shotDir || !*shotDir) shotDir = "/tmp/act1_shots";
+    }
+    if (state == 0 || gp == NULL) return;
+
+    if (state == 1) {
+        if (seqGetSeq() != SEQ_TITLE && seqGetSeq() != SEQ_GAME) return;
+        stg0_00_init();
+        marioPartyKill();
+        swInit();
+        swByteSet(0, 56); /* STORY_STG1_17_FATHER_AND_SON_REUNITED */
+        partyJoin(1);
+        marioPartyEntry(1);
+        seqSetSeq(SEQ_MAP_CHANGE, "gon_11", NULL);
+        printf("[act1_test] warping to gon_11 (story=56)\n");
+        fflush(stdout);
+        ticks = 0;
+        state = 2;
+        return;
+    }
+
+    if (state == 2) {
+        if (seqGetSeq() != SEQ_GAME || strcmp(gp->currentMapName, "gon_11") != 0) return;
+        ticks++;
+        if (ticks == 20) {
+            printf("[act1_test] closing curtain + FADE_OUT_WHITE in gon_11\n");
+            fflush(stdout);
+            fadeEntry(FADE_CURTAIN_CENTER_A2_3D, 0, (GXColor){0, 0, 0, 0});
+            fadeEntry(FADE_OUT_WHITE, 500, (GXColor){0, 0, 0, 0});
+        } else if (ticks == 60) {
+            printf("[act1_test] starting mapchange gon_11 -> aji_10 with FADE_STORY_MARIO_A1/A3\n");
+            fflush(stdout);
+            gp->areaFadeInType = FADE_STORY_MARIO_A1;
+            gp->areaFadeInDuration = 0;
+            gp->areaFadeOutType = FADE_STORY_MARIO_A3;
+            gp->areaFadeOutDuration = 0;
+            seqSetSeq(SEQ_MAP_CHANGE, "aji_10", NULL);
+            ticks = 0;
+            state = 3;
+        }
+        return;
+    }
+
+    if (state == 3) {
+        ticks++;
+        if ((ticks % 20) == 1) {
+            char req[256];
+            FILE* rf = fopen("/tmp/ttyd_screenshot.req", "w");
+            snprintf(req, sizeof(req), "%s/f_%03u.ppm", shotDir, (unsigned)shotIdx++);
+            if (rf) {
+                fprintf(rf, "%s\n", req);
+                fclose(rf);
+            }
+            printf("[act1_test] shot=%u tick=%u seq=%d map=%.*s\n", (unsigned)(shotIdx - 1), (unsigned)ticks,
+                   (int)seqGetSeq(), (int)sizeof(gp->currentMapName), gp->currentMapName);
+            fflush(stdout);
+        }
+        if (ticks >= 1200) {
+            printf("[act1_test] done shots=%u\n", (unsigned)shotIdx);
+            fflush(stdout);
+            _Exit(0);
+        }
+    }
+}
+
 void portTraceFrame(u32 frame) {
     static int enabled = -1;
     portWatchdogFrame();
+    testAct1EndFrame();
+    sweepFrame();
     warpFrame(frame);
     portGameplusFrame();
     portChaosFrame();    /* chaos mode's timer and effects (port/toggles.h) */

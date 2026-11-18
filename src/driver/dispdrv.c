@@ -284,14 +284,22 @@ static void portDispGroupMapObjects(void) {
                     }
                 }
                 if (batchN > 1 || (batchN > 0 && otherN > 0)) {
+                    s32 outIdx = i;
                     if (batchN > 1) {
                         _sortBatchItems(sBatchWork, batchN);
                     }
+                    for (k = 0; k < otherN; k++) {
+                        if (sOtherWork[k]->order < 400000.0f) {
+                            pSortWork[outIdx++] = sOtherWork[k];
+                        }
+                    }
                     for (k = 0; k < batchN; k++) {
-                        pSortWork[i + k] = sBatchWork[k].entry;
+                        pSortWork[outIdx++] = sBatchWork[k].entry;
                     }
                     for (k = 0; k < otherN; k++) {
-                        pSortWork[i + batchN + k] = sOtherWork[k];
+                        if (sOtherWork[k]->order >= 400000.0f) {
+                            pSortWork[outIdx++] = sOtherWork[k];
+                        }
                     }
                 }
             }

@@ -4657,6 +4657,11 @@ static void puni_puni_disp(CameraId camId, void* param) {
     } else {
         for (ip = &info, i = 0, off = 0; i < puniGetPoseNum(); i++, off += sizeof(PunidrvPose)) {
             pose = (PunidrvPose*)((u8*)puniGetPosePtr() + off);
+#ifdef TARGET_PC
+            if ((*pose->mtx)[1][3] <= -999.0f) {
+                continue;
+            }
+#endif
             ip->tevStage = 1;
             ip->texCoord = 1;
             ip->texMap = 1;
@@ -6012,6 +6017,12 @@ static void puni_puni_dispent(void) {
     dispEntry(CAMERA_3D, 0.0f, 1, puni_puni_disp, NULL);
     pose = puniGetPosePtr();
     for (i = 0; i < 210; i++) {
+#ifdef TARGET_PC
+        if ((*pose->mtx)[1][3] <= -999.0f) {
+            pose++;
+            continue;
+        }
+#endif
         {
             Vec zero = {0.0f, 0.0f, 0.0f};
             tmp = zero;

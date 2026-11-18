@@ -121,11 +121,23 @@ Binario Release final limpio (sin hooks de perfilado temporal): `build-aarch64/t
 - Verificado en RK3326: cargar el Archivo 2 llega a `SEQ_GAME` y sigue 300 frames sin cierre.
 - **Problema conocido**: en la zona del final del Acto 1 (caras de Mario / intervención de Peach) siguen existiendo fallos gráficos graves. No se probó esa escena tras el cambio. Esta versión es una solución temporal para evitar el cierre.
 
+### 5. `v0.4.5-rk3326`
+
+- **Corrección gráfica en el final del Acto 1 / interludio de Peach (`aji_10`)** (`src/driver/dispdrv.c`): `portDispGroupMapObjects()` mantiene las entradas `sOtherWork` con `order < 400000.0f` (como `monitor_cap_capture`) antes de `sBatchWork`, evitando que `GXCopyTex(..., GX_TRUE)` borre la sala 3D tras dibujarla.
+- **Fondo de respaldo sin verde neón** (`src/driver/bgdrv.c`): al faltar `./b/<map>.tpl` en `TARGET_PC`, se usa negro `{0x00, 0x00, 0x00, 0xFF}` en lugar de verde neón (`sys_00`, `muj_10`, `muj_20`).
+- **Estabilidad en transiciones de batalla y DVD** (`src/manager/dvdmgr.c`, `src/battle/battle.c`, `src/sequence/seq_battle.c`): guardas nulas en `DVDMgrClose`, `BattleEnd` y `seq_battleExit` para evitar cierres si se abandona `SEQ_BATTLE` antes de inicializar `_battleWorkPointer` (`win_02 -> win_03`, `eki_02 -> eki_03`).
+- **Optimizaciones de rendimiento en Mali-G31**:
+  - `rels/mri/src/mri_puni.c` y `rels/mri/src/driver/punidrv.c`: se omiten poses Puni inactivas (`(*pose->mtx)[1][3] <= -999.0f`) y se protege `GXInvalidateTexAll()` bajo `#ifndef TARGET_PC` (`mri_19` pasa de 12.36 a 19.19 FPS, `mri_16` de 15.02 a 23.50 FPS).
+  - `rels/rsh/src/rsh.c`: en `rsh_window_tev` se sustituyen las 4 capturas con `MAPOBJ_FLAG_BBOX` + `GXInvalidateTexAll()` por una única captura EFB por frame (`rsh_00_c`: 17.42 -> 50.97 FPS, `rsh_03_c`: 16.43 -> 56.77 FPS, `rsh_07_c`: 16.87 -> 52.38 FPS).
+  - `rels/hom/src/hom_00.c` y `src/driver/envdrv.c`: tabla `sin()` precalculada fuera del bucle de píxeles en `sun_tev` (`hom_00`: 18.46 -> 21.67 FPS) y `envSetWater`, con captura EFB única por frame en `envSetWater`.
+  - `src/driver/extdrv.c` y `src/driver/mapdrv.c`: culling por frustum (`extPointInFrustum`) y envío en lotes por textura en `extDraw`/`extDrawShadow`, más omisión temprana de nodos ocultos o vacíos en `_mapDispMapObj`.
+- **Verificación en RK3326**: barrido completo en dos pasadas sobre las 271 escenas (`0` cierres y `0` regresiones visuales en la segunda pasada), más re-verificación del Archivo 2 (`gor_01`) y el final del Acto 1 (`aji_10`).
+
 ---
 
 ## Instalación en PortMaster (desde el paquete Release)
 
-1. Descarga `papercut-0.4.4-rk3326-portmaster.zip` desde la sección **Releases** de este repositorio.
+1. Descarga `papercut-0.4.5-rk3326-portmaster.zip` desde la sección **Releases** de este repositorio.
 2. Descomprime su contenido en la carpeta de puertos de tu consola (`/roms/ports/`), de modo que queden:
    - `/roms/ports/Paper Cut.sh`
    - `/roms/ports/papercut/PaperCut.sh`, `ttyd-eu`, `papercut.gptk`, `libs.aarch64/`, `Logo*.jpg`, `saves/settings.txt`

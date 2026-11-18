@@ -124,6 +124,13 @@ void PORT_HOOKABLE(seq_battleInit)(SequenceWork* work) {
 
 /** Leaves the battle sequence; battle_exit tears the battle down and restores the field. */
 void PORT_HOOKABLE(seq_battleExit)(SequenceWork* work) {
+#ifdef TARGET_PC
+    if (!gp->inBattle) {
+        evtStartAll(4);
+        psndClearFlag(PSND_FLAG_MUTE_SFX);
+        return;
+    }
+#endif
     battle_exit();
 }
 

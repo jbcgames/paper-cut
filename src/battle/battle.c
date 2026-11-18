@@ -164,6 +164,11 @@ void PORT_HOOKABLE(BattleEnd)(void) {
     BattleUnit* unit;
     int i;
     void* subMenu;
+#ifdef TARGET_PC
+    if (!wp) {
+        return;
+    }
+#endif
 
     for (i = 0; i < BATTLE_UNIT_MAX; i++) {
         unit = BattleGetUnitPtr(wp, i);

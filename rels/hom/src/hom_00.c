@@ -936,6 +936,31 @@ static void sun_tev(MapTevCallbackInfo* info) {
         ind_lp = smartAlloc(GXGetTexBufferSize(64, 64, GX_TF_IA8, GX_FALSE, 0), 1);
     }
     buf = ind_lp->address;
+#ifdef TARGET_PC
+    {
+        static u32 sSunFrame = 0xFFFFFFFFu;
+        static u8* sSunBuf = NULL;
+        if (sSunFrame != gp->retraceCount || sSunBuf != buf) {
+            u8 rowVal[64];
+            sSunFrame = gp->retraceCount;
+            sSunBuf = buf;
+            for (j = 0; j < 64; j++) {
+                f32 v = sin(31.41592f * j / 64 - gp->retraceCount / 8.0f);
+                rowVal[j] = (u8)(3.0f * v + 128.0f);
+            }
+            for (i = 0; i < 64; i++) {
+                for (j = 0; j < 64; j++) {
+                    s32 off = (i / 4) << 5;
+                    off += (j / 4) << 9;
+                    off += ((i % 4) + ((j % 4) << 2)) * 2;
+                    buf[off] = rowVal[j];
+                    buf[off + 1] = 0x80;
+                }
+            }
+            DCFlushRange(buf, 0x2000);
+        }
+    }
+#else
     for (i = 0; i < 64; i++) {
         for (j = 0; j < 64; j++) {
             f32 v = sin(31.41592f * j / 64 - gp->retraceCount / 8.0f);
@@ -949,6 +974,7 @@ static void sun_tev(MapTevCallbackInfo* info) {
         }
     }
     DCFlushRange(buf, 0x2000);
+#endif
     GXInitTexObj(&obj, buf, 64, 64, GX_TF_IA8, GX_REPEAT, GX_REPEAT, GX_FALSE);
     GXInitTexObjLOD(&obj, GX_NEAR, GX_NEAR, 0.0f, 0.0f, 0.0f, GX_FALSE, GX_FALSE, GX_ANISO_1);
     GXLoadTexObj(&obj, texMap);

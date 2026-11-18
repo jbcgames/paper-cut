@@ -1392,6 +1392,31 @@ void PORT_HOOKABLE(envSetWater)(MapTevCallbackInfo* info) {
     map = info->texCoord;
     coord = info->texMap;
     ind = info->indStage;
+#ifdef TARGET_PC
+    {
+        static u8 sEnvWaterBuf[320 * 240 * 2] ATTRIBUTE_ALIGN(32);
+        static u32 sEnvWaterFrame = 0xFFFFFFFFu;
+        x0 = 0;
+        y0 = 0;
+        x1 = gp->fbWidth;
+        y1 = gp->efbHeight;
+        w = x1;
+        h = y1;
+        hw = w / 2;
+        hh = h / 2;
+        buf = sEnvWaterBuf;
+        if (sEnvWaterFrame != gp->retraceCount) {
+            sEnvWaterFrame = gp->retraceCount;
+            GXSetTexCopySrc(0, 0, (u16)w, (u16)h);
+            GXSetTexCopyDst((u16)hw, (u16)hh, GX_TF_RGB565, GX_TRUE);
+            GXCopyTex(buf, GX_FALSE);
+            GXPixModeSync();
+            GXTexModeSync();
+        }
+        GXInitTexObj(&obj1, buf, (u16)hw, (u16)hh, GX_TF_RGB565, GX_CLAMP, GX_CLAMP, GX_FALSE);
+        GXInitTexObjLOD(&obj1, GX_NEAR, GX_NEAR, 0.0f, 0.0f, 0.0f, GX_FALSE, GX_FALSE, GX_ANISO_1);
+    }
+#else
     if (obj->flags & MAPOBJ_FLAG_IN_GROUP) {
         while ((obj = envWaterParent(obj)) != NULL) {
             if (obj->flags & MAPOBJ_FLAG_GROUP) {
@@ -1456,6 +1481,7 @@ void PORT_HOOKABLE(envSetWater)(MapTevCallbackInfo* info) {
     GXTexModeSync();
     GXInitTexObj(&obj1, buf, (u16)hw, (u16)hh, GX_TF_RGB565, GX_CLAMP, GX_CLAMP, GX_FALSE);
     GXInitTexObjLOD(&obj1, GX_NEAR, GX_NEAR, 0.0f, 0.0f, 0.0f, GX_FALSE, GX_FALSE, GX_ANISO_1);
+#endif
     PSMTXMultVec(info->mtx, &(*(MapObject**)info->mapObj)->center, &pos);
     scale = 1000.0f / PSVECDistance(&camGetCurPtr()->cameraPos, &pos);
     if (scale < 0.0f) {
@@ -1465,6 +1491,24 @@ void PORT_HOOKABLE(envSetWater)(MapTevCallbackInfo* info) {
         scale = 127.0f;
     }
     buf2 = smartAlloc(GXGetTexBufferSize(64, 64, GX_TF_IA8, GX_FALSE, 0), 3)->address;
+#ifdef TARGET_PC
+    {
+        f32 sTbl[64];
+        for (j = 0; j < 64; j++) {
+            sTbl[j] = sin((f32)gp->retraceCount / 10.0f + (18.849552f * j) / 64.0f);
+        }
+        for (i = 0; i < 64; i++) {
+            for (j = 0; j < 64; j++) {
+                s32 q = i / 4;
+                s32 o = q * 32 + (j / 4) * 512;
+                q = i % 4;
+                o += ((j % 4) * 4 + q) * 2;
+                buf2[o] = (u8)(0.6f + (scale * sTbl[j] + 128.0f));
+                buf2[o + 1] = 0x80;
+            }
+        }
+    }
+#else
     for (i = 0; i < 64; i++) {
         for (j = 0; j < 64; j++) {
             f32 s = sin((f32)gp->retraceCount / 10.0f + (18.849552f * j) / 64.0f);
@@ -1480,6 +1524,7 @@ void PORT_HOOKABLE(envSetWater)(MapTevCallbackInfo* info) {
             p[1] = 0x80;
         }
     }
+#endif
     DCFlushRange(buf2, 0x2000);
     GXInitTexObj(&obj2, buf2, 64, 64, GX_TF_IA8, GX_REPEAT, GX_REPEAT, GX_FALSE);
     GXInitTexObjLOD(&obj2, GX_LINEAR, GX_LINEAR, 0.0f, 0.0f, 0.0f, GX_FALSE, GX_FALSE, GX_ANISO_1);
