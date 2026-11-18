@@ -49,6 +49,15 @@ static inline f32 sinf(f32 x) {
 #endif
 #include <string.h>
 #ifdef TARGET_PC
+static inline int mapJointHasValidBbox(const MapFileJoint* joint) {
+    const Vec* mn = &joint->bboxMin;
+    const Vec* mx = &joint->bboxMax;
+    if (mn->x > mx->x || mn->y > mx->y || mn->z > mx->z) {
+        return 0;
+    }
+    return mn->x != 0.0f || mn->y != 0.0f || mn->z != 0.0f || mx->x != 0.0f || mx->y != 0.0f || mx->z != 0.0f;
+}
+
 /* PC port: each vcd_table vertex array's own size (port/gx_arrays.h), so Aurora
  * uploads the array rather than the rest of the map file on every draw. The
  * element count is big-endian in the file; the size uses the largest stride
@@ -638,11 +647,17 @@ static MapObject* _mapEnt(MapFileJoint* joint, MapObject* parent, Mtx mtx, s32 i
         obj->center = joint->translation;
     }
     if (joint->partCount) {
+#ifdef TARGET_PC
+        if (mapJointHasValidBbox(joint)) {
+            obj->flags |= MAPOBJ_FLAG_BBOX_CULL;
+        }
+#else
         PSMTXMultVec(obj->modelWorldMtx, &obj->center, &a);
         PSMTXMultVec(obj->modelWorldMtx, &joint->bboxMax, &b);
         if (PSVECSquareDistance(&a, &b) < 20000.0f) {
             obj->flags |= MAPOBJ_FLAG_BBOX_CULL;
         }
+#endif
     }
     return obj;
 }
@@ -2412,6 +2427,53 @@ static inline void callPackedLists(MapFileMesh* mesh) {
  * siblings; then loads its matrices, cull mode and fog and draws each part from the prebuilt display lists
  * or by setting up the material and mesh. Skips hidden or fully transparent group members.
  */
+#ifdef TARGET_PC
+/* 6-plane homogeneous clip-space AABB visibility test: culls only if all 8 corners fall strictly outside
+ * the same linear clip half-space, handling wide boxes and behind-near corners cleanly without dividing by w. */
+static inline int mapClipBoxVisible(const CameraEntry* camera, Mtx mv, const Vec* bmin, const Vec* bmax,
+                                    f32 marginX, f32 marginY) {
+    const f32 dx = bmax->x - bmin->x;
+    const f32 dy = bmax->y - bmin->y;
+    const f32 dz = bmax->z - bmin->z;
+    const f32 (*p)[4];
+    f32 bx, by, bz;
+    f32 c0[4], ex[4], ey[4], ez[4];
+    int allMask = 0x3F;
+    int i;
+    if (dx < 0.0f || dy < 0.0f || dz < 0.0f || (dx == 0.0f && dy == 0.0f && dz == 0.0f)) {
+        return 1;
+    }
+    p = camera->projection;
+    bx = mv[0][0] * bmin->x + mv[0][1] * bmin->y + mv[0][2] * bmin->z + mv[0][3];
+    by = mv[1][0] * bmin->x + mv[1][1] * bmin->y + mv[1][2] * bmin->z + mv[1][3];
+    bz = mv[2][0] * bmin->x + mv[2][1] * bmin->y + mv[2][2] * bmin->z + mv[2][3];
+    for (i = 0; i < 4; i++) {
+        c0[i] = p[i][0] * bx + p[i][1] * by + p[i][2] * bz + p[i][3];
+        ex[i] = (p[i][0] * mv[0][0] + p[i][1] * mv[1][0] + p[i][2] * mv[2][0]) * dx;
+        ey[i] = (p[i][0] * mv[0][1] + p[i][1] * mv[1][1] + p[i][2] * mv[2][1]) * dy;
+        ez[i] = (p[i][0] * mv[0][2] + p[i][1] * mv[1][2] + p[i][2] * mv[2][2]) * dz;
+    }
+    for (i = 0; i < 8; i++) {
+        const f32 cx = c0[0] + ((i & 1) ? ex[0] : 0.0f) + ((i & 2) ? ey[0] : 0.0f) + ((i & 4) ? ez[0] : 0.0f);
+        const f32 cy = c0[1] + ((i & 1) ? ex[1] : 0.0f) + ((i & 2) ? ey[1] : 0.0f) + ((i & 4) ? ez[1] : 0.0f);
+        const f32 cz = c0[2] + ((i & 1) ? ex[2] : 0.0f) + ((i & 2) ? ey[2] : 0.0f) + ((i & 4) ? ez[2] : 0.0f);
+        const f32 cw = c0[3] + ((i & 1) ? ex[3] : 0.0f) + ((i & 2) ? ey[3] : 0.0f) + ((i & 4) ? ez[3] : 0.0f);
+        int out = 0;
+        if (cx < -marginX * cw) out |= 1;
+        if (cx > marginX * cw) out |= 2;
+        if (cy < -marginY * cw) out |= 4;
+        if (cy > marginY * cw) out |= 8;
+        if (cz < -cw) out |= 16;
+        if (cz > 0.0f) out |= 32;
+        allMask &= out;
+        if (allMask == 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+#endif
+
 static void _mapDispMapObj(CameraId cam, MapObject* obj) {
     CameraEntry* camera;
     CameraEntry* cur;
@@ -2429,6 +2491,7 @@ static void _mapDispMapObj(CameraId cam, MapObject* obj) {
     MapWork* wp;
     int j;
     void* material;
+    int biasChanged = 0;
     camera = camGetPtr(cam);
     current_mp = obj;
 #ifdef TARGET_PC
@@ -2441,6 +2504,14 @@ static void _mapDispMapObj(CameraId cam, MapObject* obj) {
          ((obj->flags & MAPOBJ_FLAG_COLOR_ALPHA) && obj->color.a == 0))) {
         return;
     }
+    if ((obj->flags & MAPOBJ_FLAG_IN_GROUP) && !mapClipOffFlag && !(obj->flags & MAPOBJ_FLAG_KURURING_PASS) &&
+        cam == obj->cameraId && mapJointHasValidBbox(obj->joints)) {
+        Mtx mvCull;
+        PSMTXConcat(camera->view, obj->modelWorldMtx, mvCull);
+        if (!mapClipBoxVisible(camera, mvCull, &obj->joints->bboxMin, &obj->joints->bboxMax, 1.65f, 1.25f)) {
+            return;
+        }
+    }
 #endif
     if (obj->flags & MAPOBJ_FLAG_IN_GROUP) {
         if (obj->flags & MAPOBJ_FLAG_DEPTH_BIAS) {
@@ -2452,12 +2523,15 @@ static void _mapDispMapObj(CameraId cam, MapObject* obj) {
                 n++;
             }
 
-            scale = 0.01f * n;
-            GXGetProjectionv(proj);
-            d = 1.0f;
-            d = (d * (camera->far + camera->near)) * (d + scale);
-            proj[5] *= 1.0f + ((scale * (((-2.0f) * camera->far) * camera->near)) / d);
-            GXSetProjectionv(proj);
+            if (n != 0) {
+                scale = 0.01f * n;
+                GXGetProjectionv(proj);
+                d = 1.0f;
+                d = (d * (camera->far + camera->near)) * (d + scale);
+                proj[5] *= 1.0f + ((scale * (((-2.0f) * camera->far) * camera->near)) / d);
+                GXSetProjectionv(proj);
+                biasChanged = 1;
+            }
         }
         mode = obj->blendMode;
         if (obj->joints->partCount > 0) {
@@ -2683,7 +2757,7 @@ static void _mapDispMapObj(CameraId cam, MapObject* obj) {
             }
         }
     }
-    if (obj->flags & MAPOBJ_FLAG_DEPTH_BIAS) {
+    if (biasChanged) {
         GXSetProjection(camera->projection, camera->projType);
     }
 
@@ -2887,12 +2961,14 @@ void mapDisp(void) {
     int j, i;
     Mtx scale;
     Mtx mtx;
-    Vec v;
     Vec center;
     f32 z;
     s32 mode;
     MapFileJoint* joint;
+#ifndef TARGET_PC
+    Vec v;
     BOOL clipped;
+#endif
 
 #if VERSION >= VERSION_JP
     if (disableMapDraw) {
@@ -2928,6 +3004,16 @@ void mapDisp(void) {
             if (!(obj->flags & MAPOBJ_FLAG_NO_BLEND2) && (entry->flags & MAPENT_FLAG_BLEND2) && entry->blend2.a == 0)
                 continue;
             PSMTXConcat(camera->view, obj->modelWorldMtx, mtx);
+#ifdef TARGET_PC
+            if (!mapClipOffFlag && !(obj->flags & MAPOBJ_FLAG_KURURING_PASS) &&
+                !(obj->flags & MAPOBJ_FLAG_GROUP) && obj->joints->partCount > 0 &&
+                mapJointHasValidBbox(obj->joints)) {
+                joint = obj->joints;
+                if (!mapClipBoxVisible(camera, mtx, &joint->bboxMin, &joint->bboxMax, 1.65f, 1.25f)) {
+                    continue;
+                }
+            }
+#else
             if ((obj->flags & MAPOBJ_FLAG_BBOX_CULL) && !mapClipOffFlag) {
                 joint = obj->joints;
                 clipped = FALSE;
@@ -2995,6 +3081,7 @@ void mapDisp(void) {
                 if (clipped)
                     continue;
             }
+#endif
             PSMTXMultVec(mtx, &obj->center, &center);
             PSMTX44MultVec(camera->projection, &center, &center);
             z = 5000.0f * center.z + 5000.0f;

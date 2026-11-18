@@ -307,6 +307,34 @@ static void effFireMain(EffectEntry* effect) {
         case 3:
         case 4:
         case 8:
+#ifdef TARGET_PC
+            if (work->alpha <= 0 || work->scale <= 0.0f || work->scaleX <= 0.0f || work->scaleY <= 0.0f) {
+                break;
+            }
+            {
+                CameraEntry* cam = camGetPtr(CAMERA_3D);
+                if (cam != NULL && cam->projType == GX_PERSPECTIVE) {
+                    Vec vp;
+                    f32 mx = work->scaleX > work->scaleY ? work->scaleX : work->scaleY;
+                    f32 rad = 80.0f * (work->scale > 1.0f ? work->scale : 1.0f) * (mx > 1.0f ? mx : 1.0f);
+                    PSMTXMultVec(cam->view, &work->position, &vp);
+                    f32 cw = -vp.z;
+                    if (cw + rad < 0.0f) {
+                        break;
+                    }
+                    if (cw > 0.0f) {
+                        f32 cx = cam->projection[0][0] * vp.x + cam->projection[0][2] * vp.z;
+                        f32 cy = cam->projection[1][1] * vp.y + cam->projection[1][2] * vp.z;
+                        f32 rx = rad * (cam->projection[0][0] < 0.0f ? -cam->projection[0][0] : cam->projection[0][0]);
+                        f32 ry = rad * (cam->projection[1][1] < 0.0f ? -cam->projection[1][1] : cam->projection[1][1]);
+                        if ((cx < 0.0f ? -cx : cx) > 1.65f * cw + rx ||
+                            (cy < 0.0f ? -cy : cy) > 1.25f * cw + ry) {
+                            break;
+                        }
+                    }
+                }
+            }
+#endif
             dispEntry(CAMERA_3D, dispCalcZ(&work->position), 2, (DispCallback)effFireDisp2, effect);
             break;
         case 5:

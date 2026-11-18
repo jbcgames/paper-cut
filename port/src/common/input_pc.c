@@ -1073,6 +1073,7 @@ void portInputApply(PADStatus* pad) {
     static int sCuePress = -1;
     static int sHapticsPress;
     applyScript(pad);
+    portSweepMovePad(pad);
     applyPress(pad, 1);
     applyPress(pad, 2);
     applyPress(pad, 3);

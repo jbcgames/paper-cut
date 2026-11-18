@@ -18,6 +18,9 @@
 #include "pmario_sound.h"
 #include "system.h"
 #include <string.h>
+#ifdef TARGET_PC
+#include "port/platform.h"
+#endif
 #include "eff/n64/eff_kemuri10_n64.h"
 #include "libc_decls.h"
 #include <math.h>
@@ -1965,6 +1968,19 @@ USER_FUNC(evt_npc_battle_start) {
     fbat = fbatGetPointer();
     npc = evtNpcNameToPtr(event, name);
     info = &fbat->info;
+#ifdef TARGET_PC
+    if (portSweepNoBattle()) {
+        if (isFirstCall) {
+            marioCtrlOff();
+            party = partyGetPtr(marioGetPartyId());
+            if (party) {
+                partyCtrlOff();
+            }
+            BattleInformationSetResult(info, 1);
+        }
+        return EVT_RETURN_DONE;
+    }
+#endif
     if (isFirstCall) {
         fbat->target = npc;
 #if VERSION >= VERSION_US

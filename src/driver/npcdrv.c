@@ -2025,7 +2025,15 @@ void fbatEncountCheck(void) {
 #endif
     data = gp->fbatData;
     kind = (u32*)&data->hitKind;
+#ifdef TARGET_PC
+    npc = portSweepNoBattle()
+              ? NULL
+              : fbatHitCheck(FBAT_CHECK_ENEMIES | FBAT_CHECK_BOMB | FBAT_CHECK_SHELL | FBAT_CHECK_SPIN_HAMMER |
+                                 FBAT_CHECK_HAMMER | FBAT_CHECK_JUMP | FBAT_CHECK_CONTACT | FBAT_CHECK_LIVE_ATTACK,
+                             kind);
+#else
     npc = fbatHitCheck(FBAT_CHECK_ENEMIES | FBAT_CHECK_BOMB | FBAT_CHECK_SHELL | FBAT_CHECK_SPIN_HAMMER | FBAT_CHECK_HAMMER | FBAT_CHECK_JUMP | FBAT_CHECK_CONTACT | FBAT_CHECK_LIVE_ATTACK, kind);
+#endif
     if (npc && (data->mode == 1)) {
         AnimationPose* pose;
         f32 rel;
@@ -3888,7 +3896,13 @@ static void npcKoopaModeEncountCheck(void) {
                         }
                         break;
                     case 4:
+#ifdef TARGET_PC
+                        if (!portSweepNoBattle()) {
+                            kpaPowDown();
+                        }
+#else
                         kpaPowDown();
+#endif
                         break;
                     default:
                         if (!(entry->hazardFlags & NPC_KOOPA_DEATH_LAVA) && entry->groundHit &&

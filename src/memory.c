@@ -885,6 +885,25 @@ void smartGarbage(void) {
     DCFlushRange(wp->ptr, smartHeapSize());
 }
 
+#ifdef TARGET_PC
+/**
+ * Runs the frame's type-3 smart-heap cleanup and waits on any pending GX draw
+ * sync before camDraw() queues the frame's 3D FIFO work (so the first smartAlloc
+ * late in dispDraw — e.g. envGlare / imgCapture — never drains thousands of
+ * queued draws synchronously on the CPU thread).
+ */
+void smartPreDispSync(void) {
+    if (!g_bFirstSmartAlloc) {
+        g_bFirstSmartAlloc = TRUE;
+        smartAutoFree(3);
+    }
+    if (wp->waitsync) {
+        sysWaitDrawSync();
+        wp->waitsync = 0;
+    }
+}
+#endif
+
 /**
  * Points a texture object at its smart heap image again (the data may have moved during compaction)
  * and returns it; passing NULL leaves the object unchanged.

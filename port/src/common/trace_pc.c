@@ -1,11 +1,19 @@
 /* Bring-up trace ($TTYD_TRACE): one line whenever the game sequence or map
  * changes, with the frame number, so a headless run shows how far it got. */
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
 #include <dolphin/vi.h>
+#include "driver/camdrv.h"
+#include "driver/npcdrv.h"
 #include "driver/seqdrv.h"
+#include "evt/evt_bero.h"
+#include "koopa.h"
+#include "mario/mario.h"
+#include "mario/mario_pouch.h"
+#include "mario/mario_sbr.h"
 #include "mario/mariost.h"
 #include "manager/evtmgr.h"
 #include "evt/evt_cmd.h"
@@ -122,6 +130,7 @@ static void warpFrame(u32 frame) {
     }
     /* the title, or the opening demo's map (its narration stalls in $TTYD_FAST runs) */
     if (state == 1 && (seqGetSeq() == SEQ_TITLE || (seqGetSeq() == SEQ_GAME && strcmp(gp->currentMapName, map) != 0))) {
+        marioStSystemLevel(0);
         stg0_00_init();
         marioPartyKill();
         swInit();
@@ -219,13 +228,211 @@ void portTraceMsgMissing(const char* tag) {
 
 /* $TTYD_SWEEP_FILE=<path>: sequentially warp through <map>,<bero>,<story> entries
  * in one run, optionally capturing screenshots ($TTYD_SWEEP_SHOT_DIR/<map>.png) and
- * reporting steady-state frame timing per scene. */
+ * reporting steady-state frame timing per scene. With $TTYD_SWEEP_MOVE=1, drives Mario
+ * in a consistent direction through each room while actively steering/jumping to elude
+ * enemies and blocking exits/battles so full real-movement perf can be measured. */
 #define SWEEP_MAX_ENTRIES 320
+#define SWEEP_PERF_CAP 240
 typedef struct SweepEntry {
     char map[32];
     char bero[32];
     s32 story;
 } SweepEntry;
+
+static int sMoveMode = -1;
+static int sNoBattleMode = -1;
+static int sMoveNoExit = 0;
+static int sMovePhase = 0; /* 0 off, 1 waiting entry walk-in settle, 2 active moving */
+static int sMoveExitBlocked = 0;
+static f32 sMoveBaseDeg = 90.0f;
+static Vec sMovePrevPos;
+static Vec sMoveAnchorPos;
+static u32 sMoveEnterWait = 0;
+static u32 sMoveTicks = 0;
+static u32 sMoveEvadeFrames = 0;
+static u32 sMoveRevs = 0;
+static u32 sMoveStuckChecks = 0;
+static u32 sMoveJumpTicks = 0;
+static u32 sMoveTurnCooldown = 0;
+static f32 sMoveDist = 0.0f;
+
+static void initSweepMoveEnv(void) {
+    if (sMoveMode < 0) {
+        const char* file = getenv("TTYD_SWEEP_FILE");
+        const char* mv = getenv("TTYD_SWEEP_MOVE");
+        const char* nb = getenv("TTYD_SWEEP_NO_BATTLE");
+        sMoveMode = (file && *file && mv && atoi(mv) != 0) ? 1 : 0;
+        sNoBattleMode = (sMoveMode || (file && *file && nb && atoi(nb) != 0)) ? 1 : 0;
+    }
+}
+
+BOOL portSweepMoveActive(void) {
+    initSweepMoveEnv();
+    return sMoveMode && sMoveNoExit;
+}
+
+BOOL portSweepNoBattle(void) {
+    initSweepMoveEnv();
+    return sNoBattleMode != 0;
+}
+
+void portSweepMoveNotifyExitBlocked(void) {
+    sMoveExitBlocked = 1;
+}
+
+static f32 wrapDeg360(f32 deg) {
+    while (deg < 0.0f) deg += 360.0f;
+    while (deg >= 360.0f) deg -= 360.0f;
+    return deg;
+}
+
+void portSweepMovePad(PADStatus* pad) {
+    MarioWork* m;
+    NpcWork* wp;
+    f32 baseRad, dirX, dirZ, steerX, steerZ;
+    f32 bestDist = 1e9f, bestEx = 0.0f, bestEz = 0.0f, bestWidth = 0.0f;
+    const NpcEntry* bestNpc = NULL;
+
+    initSweepMoveEnv();
+    if (!sMoveMode || sMovePhase == 0 || gp == NULL || seqGetSeq() != SEQ_GAME) {
+        return;
+    }
+    if ((marioKeyOffChk() || marioCtrlOffChk()) && strncmp(gp->currentMapName, "sys_", 4) != 0 &&
+        strncmp(gp->currentMapName, "dmo_", 4) != 0 && strncmp(gp->currentMapName, "end_", 4) != 0 &&
+        strncmp(gp->currentMapName, "jon_", 4) != 0) {
+        static u32 sDialogPulse = 0;
+        sDialogPulse++;
+        if ((sDialogPulse % 4u) < 2u) {
+            pad[0].err = PAD_ERR_NONE;
+            pad[0].button |= PAD_BUTTON_B;
+            pad[0].analogB = 255;
+        }
+    }
+    if (sMovePhase != 2) {
+        return;
+    }
+    m = marioGetPtr();
+    if (m == NULL) {
+        return;
+    }
+
+    pad[0].err = PAD_ERR_NONE;
+
+    if (sMoveExitBlocked) {
+        sMoveBaseDeg = wrapDeg360(sMoveBaseDeg + 180.0f);
+        sMoveRevs++;
+        sMoveExitBlocked = 0;
+        sMoveStuckChecks = 0;
+        sMoveTurnCooldown = 16;
+    }
+
+    if (sMoveTurnCooldown > 0) {
+        sMoveTurnCooldown--;
+    }
+
+    if (sMoveTicks > 0 && (sMoveTicks % 16) == 0 && !marioKeyOffChk() && !marioCtrlOffChk()) {
+        f32 dx = m->position.x - sMoveAnchorPos.x;
+        f32 dz = m->position.z - sMoveAnchorPos.z;
+        f32 moved = sqrtf(dx * dx + dz * dz);
+        sMoveAnchorPos = m->position;
+        if (sMoveTurnCooldown == 0 && moved < 5.0f) {
+            if (sMoveStuckChecks == 0) {
+                sMoveJumpTicks = 12;
+                sMoveStuckChecks = 1;
+            } else {
+                f32 turn = (sMoveRevs & 1u) ? 90.0f : 180.0f;
+                sMoveBaseDeg = wrapDeg360(sMoveBaseDeg + turn);
+                sMoveRevs++;
+                sMoveStuckChecks = 0;
+                sMoveTurnCooldown = 16;
+            }
+        } else if (moved >= 5.0f) {
+            sMoveStuckChecks = 0;
+        }
+    }
+    sMoveTicks++;
+
+    baseRad = sMoveBaseDeg * 0.0174532925f;
+    dirX = sinf(baseRad);
+    dirZ = -cosf(baseRad);
+    steerX = dirX;
+    steerZ = dirZ;
+
+    wp = npcGetWorkPtr();
+    if (wp != NULL && wp->entries != NULL) {
+        s32 i;
+        for (i = 0; i < wp->total; i++) {
+            const NpcEntry* npc = &wp->entries[i];
+            f32 ex, ez, ey, d, fwd, radius;
+            if (!(npc->flags & NPC_FLAG_ACTIVE) || !(npc->flags & NPC_FLAG_ENEMY)) {
+                continue;
+            }
+            if ((npc->flags & (NPC_FLAG_HIDDEN | NPC_FLAG_INTANGIBLE)) || (npc->jumpFlags & NPC_STATUS_DEAD)) {
+                continue;
+            }
+            if (npc->position.y < -500.0f) {
+                continue;
+            }
+            ey = npc->position.y - m->position.y;
+            if (fabsf(ey) > 100.0f) {
+                continue;
+            }
+            ex = npc->position.x - m->position.x;
+            ez = npc->position.z - m->position.z;
+            d = sqrtf(ex * ex + ez * ez);
+            fwd = ex * dirX + ez * dirZ;
+            radius = 105.0f + 0.5f * npc->width;
+            if (d < radius && fwd > -15.0f && d < bestDist) {
+                bestDist = d;
+                bestEx = ex;
+                bestEz = ez;
+                bestWidth = npc->width;
+                bestNpc = npc;
+            }
+        }
+    }
+
+    if (bestNpc != NULL) {
+        sMoveEvadeFrames++;
+        if ((kpaGetStageViewType() == 0 && m->characterId == 2) || (m->flags & MARIO_FLAG_BG_MODE)) {
+            if (bestDist < 85.0f && sMoveJumpTicks == 0) {
+                sMoveJumpTicks = 14;
+            }
+        } else {
+            f32 perpX = -dirZ;
+            f32 perpZ = dirX;
+            f32 lat = bestEx * perpX + bestEz * perpZ;
+            f32 side = (lat >= 0.0f) ? -1.0f : 1.0f;
+            f32 radius = 105.0f + 0.5f * bestWidth;
+            f32 w = (radius - bestDist) / 45.0f;
+            if (w < 0.5f) w = 0.5f;
+            if (w > 2.0f) w = 2.0f;
+            steerX = dirX + side * w * perpX;
+            steerZ = dirZ + side * w * perpZ;
+            if (bestDist < 42.0f && fabsf(lat) < 22.0f && sMoveJumpTicks == 0) {
+                sMoveJumpTicks = 10;
+            }
+        }
+    }
+
+    if (sMoveJumpTicks > 0) {
+        sMoveJumpTicks--;
+        if (wp == NULL || wp->talkTarget == NULL) {
+            pad[0].button |= PAD_BUTTON_A;
+            pad[0].analogA = 255;
+        }
+    }
+
+    {
+        f32 len = sqrtf(steerX * steerX + steerZ * steerZ);
+        if (len > 0.001f) {
+            f32 worldDeg = atan2f(steerX, -steerZ) * 57.2957795f;
+            f32 stickRad = (worldDeg - m->targetYaw) * 0.0174532925f;
+            pad[0].stickX = (s8)(110.0f * sinf(stickRad));
+            pad[0].stickY = (s8)(110.0f * cosf(stickRad));
+        }
+    }
+}
 
 static int cmpFloatAsc(const void* a, const void* b) {
     float fa = *(const float*)a, fb = *(const float*)b;
@@ -240,10 +447,15 @@ static void sweepFrame(void) {
     static const char* shotDir = NULL;
     static time_t loadStart = 0;
 
+    initSweepMoveEnv();
+
     if (state < 0) {
         const char* path = getenv("TTYD_SWEEP_FILE");
         const char* v;
         state = 0;
+        if (sMoveMode) {
+            exitFrames = 120;
+        }
         if (path && *path) {
             FILE* f = fopen(path, "r");
             if (!f) {
@@ -290,6 +502,17 @@ static void sweepFrame(void) {
         if (idx == 0 && seqGetSeq() != SEQ_TITLE && seqGetSeq() != SEQ_GAME) {
             return;
         }
+        sMoveNoExit = 0;
+        sMovePhase = 0;
+        sMoveExitBlocked = 0;
+        sMoveEnterWait = 0;
+        sMoveTicks = 0;
+        sMoveEvadeFrames = 0;
+        sMoveRevs = 0;
+        sMoveStuckChecks = 0;
+        sMoveJumpTicks = 0;
+        sMoveTurnCooldown = 0;
+        sMoveDist = 0.0f;
         if (idx >= total) {
             printf("[sweep:all_done] total=%d\n", total);
             fflush(stdout);
@@ -306,6 +529,7 @@ static void sweepFrame(void) {
                    (int)e->story);
             fflush(stdout);
 
+            marioStSystemLevel(0);
             stg0_00_init();
             marioPartyKill();
             swInit();
@@ -329,6 +553,11 @@ static void sweepFrame(void) {
         waitFrames++;
         if (waitFrames >= 5 && s != SEQ_MAP_CHANGE && s != SEQ_LOGO && s != SEQ_TITLE) {
             onMapFrames = 0;
+            if (sMoveMode) {
+                sMoveNoExit = 1;
+                sMovePhase = 1;
+                sMoveEnterWait = 0;
+            }
             state = 3;
             return;
         }
@@ -344,12 +573,58 @@ static void sweepFrame(void) {
 
     if (state == 3) {
         const SweepEntry* e = &entries[idx];
+        if (sMoveMode) {
+            PouchData* pouch = pouchGetPtr();
+            if (pouch != NULL) {
+                if (pouch->maximumHP < 10) pouch->maximumHP = 10;
+                if (pouch->currentHP < 10) pouch->currentHP = 10;
+            }
+            if (sMovePhase == 1) {
+                u32 maxWait = (strncmp(e->map, "sys_", 4) == 0 || strncmp(e->map, "dmo_", 4) == 0 ||
+                               strncmp(e->map, "end_", 4) == 0 || strncmp(e->map, "jon_", 4) == 0)
+                                  ? 20u
+                                  : 240u;
+                sMoveEnterWait++;
+                if (sMoveEnterWait < maxWait &&
+                    ((bero_get_BeroEXEC() & 1) || marioKeyOffChk() || marioCtrlOffChk())) {
+                    return;
+                }
+                {
+                    MarioWork* m = marioGetPtr();
+                    sMoveBaseDeg = m != NULL ? wrapDeg360(toMovedir(m->displayDirection)) : 90.0f;
+                    if (m != NULL && kpaGetStageViewType() == 0 && m->characterId == 2 &&
+                        fabsf(sinf(sMoveBaseDeg * 0.0174532925f)) < 0.25f) {
+                        sMoveBaseDeg = 90.0f;
+                    }
+                    if (m != NULL) {
+                        sMovePrevPos = m->position;
+                        sMoveAnchorPos = m->position;
+                    }
+                }
+                sMovePhase = 2;
+                onMapFrames = 0;
+                return;
+            }
+            if (sMovePhase == 2) {
+                MarioWork* m = marioGetPtr();
+                if (m != NULL) {
+                    f32 dx = m->position.x - sMovePrevPos.x;
+                    f32 dz = m->position.z - sMovePrevPos.z;
+                    f32 step = sqrtf(dx * dx + dz * dz);
+                    if (step < 80.0f) {
+                        sMoveDist += step;
+                    }
+                    sMovePrevPos = m->position;
+                }
+            }
+        }
+
         onMapFrames++;
         if (onMapFrames >= exitFrames) {
-            float fps = 0.0f, mean_iv = 0.0f, p50_iv = 0.0f, mean_work = 0.0f, max_work = 0.0f;
+            float fps = 0.0f, mean_iv = 0.0f, p50_iv = 0.0f, p95_iv = 0.0f, mean_work = 0.0f, max_work = 0.0f;
 #ifdef TTYD_BACKEND_AURORA
-            float iv[40], wk[40], sorted_iv[40];
-            int want = onMapFrames < 40 ? (int)onMapFrames : 40;
+            float iv[SWEEP_PERF_CAP], wk[SWEEP_PERF_CAP], sorted_iv[SWEEP_PERF_CAP];
+            int want = onMapFrames < SWEEP_PERF_CAP ? (int)onMapFrames : SWEEP_PERF_CAP;
             int n = portPerfSamples(iv, wk, want);
             if (n > 0) {
                 int i;
@@ -363,12 +638,15 @@ static void sweepFrame(void) {
                 mean_work /= (float)n;
                 qsort(sorted_iv, (size_t)n, sizeof(float), cmpFloatAsc);
                 p50_iv = sorted_iv[n / 2];
+                p95_iv = sorted_iv[(n * 95) / 100 < n ? (n * 95) / 100 : n - 1];
                 if (mean_iv > 0.01f) fps = 1000.0f / mean_iv;
             }
 #endif
-            printf("[sweep:done] map=%s active_map=%.*s seq=%d fps=%.2f mean_iv=%.2f p50_iv=%.2f mean_work=%.2f max_work=%.2f\n",
+            sMoveNoExit = 0;
+            sMovePhase = 0;
+            printf("[sweep:done] map=%s active_map=%.*s seq=%d fps=%.2f mean_iv=%.2f p50_iv=%.2f p95_iv=%.2f mean_work=%.2f max_work=%.2f disp=%.1f evades=%u revs=%u\n",
                    e->map, (int)sizeof(gp->currentMapName), gp->currentMapName, (int)seqGetSeq(), fps, mean_iv, p50_iv,
-                   mean_work, max_work);
+                   p95_iv, mean_work, max_work, sMoveDist, (unsigned)sMoveEvadeFrames, (unsigned)sMoveRevs);
             fflush(stdout);
             if (shotDir && *shotDir) {
                 FILE* rf = fopen("/tmp/ttyd_screenshot.req", "w");
@@ -409,6 +687,7 @@ static void testAct1EndFrame(void) {
 
     if (state == 1) {
         if (seqGetSeq() != SEQ_TITLE && seqGetSeq() != SEQ_GAME) return;
+        marioStSystemLevel(0);
         stg0_00_init();
         marioPartyKill();
         swInit();

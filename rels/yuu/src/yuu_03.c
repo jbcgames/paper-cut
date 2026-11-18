@@ -297,6 +297,86 @@ static void ryushi_disp(CameraId camera, void* param) {
     Mtx out;
     Mtx base;
     GXTexObj tex;
+#ifdef TARGET_PC
+    s32 active = 0;
+    for (i = 1, p = hdr + 1; i < ryuwp; i++, p++) {
+        if (p->scale) {
+            active++;
+        }
+    }
+    if (active == 0) {
+        return;
+    }
+    PSMTXScale(base, hdr->scale, hdr->scale, 1.0f);
+    PSMTXTransApply(base, base, hdr->pos.x, hdr->pos.y, hdr->pos.z);
+    PSMTXRotRad(rot, 'y', 0.017453292f * -camGetPtr(camera)->viewYaw);
+    PSMTXConcat(base, rot, base);
+    effGetTexObj(0x1E, &tex);
+    GXLoadTexObj(&tex, GX_TEXMAP0);
+    GXSetTevColor(GX_TEVREG1, (GXColor){hdr->r2, hdr->g2, hdr->b2});
+    GXSetNumChans(1);
+    GXSetChanCtrl(GX_COLOR0A0, GX_FALSE, GX_SRC_VTX, GX_SRC_VTX, GX_LIGHT_NULL, GX_DF_NONE, GX_AF_NONE);
+    GXSetNumTexGens(1);
+    GXSetTexCoordGen2(GX_TEXCOORD0, GX_TG_MTX2x4, GX_TG_TEX0, GX_IDENTITY, GX_FALSE, GX_PTIDENTITY);
+    GXSetNumTevStages(2);
+    GXSetTevOrder(GX_TEVSTAGE0, GX_TEXCOORD0, GX_TEXMAP0, GX_COLOR_NULL);
+    GXSetTevColorOp(GX_TEVSTAGE0, GX_TEV_ADD, GX_TB_ZERO, GX_CS_SCALE_1, GX_TRUE, GX_TEVPREV);
+    GXSetTevAlphaOp(GX_TEVSTAGE0, GX_TEV_ADD, GX_TB_ZERO, GX_CS_SCALE_1, GX_TRUE, GX_TEVPREV);
+    GXSetTevColorIn(GX_TEVSTAGE0, GX_CC_ZERO, GX_CC_TEXC, GX_CC_TEXC, GX_CC_ZERO);
+    GXSetTevAlphaIn(GX_TEVSTAGE0, GX_CA_ZERO, GX_CA_ZERO, GX_CA_ZERO, GX_CA_TEXA);
+    GXSetTevOrder(GX_TEVSTAGE1, GX_TEXCOORD_NULL, GX_TEXMAP_NULL, GX_COLOR0A0);
+    GXSetTevColorOp(GX_TEVSTAGE1, GX_TEV_ADD, GX_TB_ZERO, GX_CS_SCALE_1, GX_TRUE, GX_TEVPREV);
+    GXSetTevAlphaOp(GX_TEVSTAGE1, GX_TEV_ADD, GX_TB_ZERO, GX_CS_SCALE_1, GX_TRUE, GX_TEVPREV);
+    GXSetTevColorIn(GX_TEVSTAGE1, GX_CC_RASC, GX_CC_C1, GX_CC_CPREV, GX_CC_ZERO);
+    GXSetTevAlphaIn(GX_TEVSTAGE1, GX_CA_ZERO, GX_CA_RASA, GX_CA_APREV, GX_CA_ZERO);
+    GXSetCullMode(GX_CULL_NONE);
+    GXClearVtxDesc();
+    GXSetVtxDesc(GX_VA_POS, GX_DIRECT);
+    GXSetVtxDesc(GX_VA_CLR0, GX_DIRECT);
+    GXSetVtxDesc(GX_VA_TEX0, GX_DIRECT);
+    GXSetVtxAttrFmt(GX_VTXFMT0, GX_VA_POS, GX_POS_XYZ, GX_F32, 0);
+    GXSetVtxAttrFmt(GX_VTXFMT0, GX_VA_CLR0, GX_CLR_RGBA, GX_RGBA8, 0);
+    GXSetVtxAttrFmt(GX_VTXFMT0, GX_VA_TEX0, GX_TEX_ST, GX_F32, 0);
+    PSMTXConcat(camGetPtr(camera)->view, base, out);
+    GXLoadPosMtxImm(out, GX_PNMTX0);
+    GXSetCurrentMtx(GX_PNMTX0);
+    amp = 3.0f;
+    GXBegin(GX_QUADS, GX_VTXFMT0, (u16)(active * 4));
+    for (i = 1, p = hdr + 1; i < ryuwp; i++, p++) {
+        scale = p->scale;
+        if (scale) {
+            f32 tx, ty, tz, s8, s24;
+            u8 a = (u8)p->alpha;
+            deg = 180.0f * ((p->pos.z / 8.0f + 3.14f * i / 4.0f) / 3.14f);
+            n = deg / 360.0f;
+            if (deg < 0.0f) {
+                n--;
+            }
+            deg -= n * 360;
+            tx = p->pos.x + amp * yuusintbl[(s32)deg];
+            ty = p->pos.y;
+            tz = p->pos.z;
+            s8 = 8.0f * scale;
+            s24 = 24.0f * scale;
+            GXPosition3f32(tx - s8, ty - s8, tz);
+            GXColor4u8(3, (u8)g, (u8)b, a);
+            GXTexCoord2f32(0.0f, 0.0f);
+            GXPosition3f32(tx + s8, ty - s8, tz);
+            GXColor4u8(3, (u8)g, (u8)b, a);
+            GXTexCoord2f32(1.0f, 0.0f);
+            GXPosition3f32(tx + s8, ty - s24, tz);
+            GXColor4u8(3, (u8)g, (u8)b, a);
+            GXTexCoord2f32(1.0f, 1.0f);
+            GXPosition3f32(tx - s8, ty - s24, tz);
+            GXColor4u8(3, (u8)g, (u8)b, a);
+            GXTexCoord2f32(0.0f, 1.0f);
+        }
+    }
+    GXEnd();
+    (void)trans;
+    (void)scl;
+    return;
+#endif
 
     PSMTXScale(base, hdr->scale, hdr->scale, 1.0f);
     PSMTXTransApply(base, base, hdr->pos.x, hdr->pos.y, hdr->pos.z);

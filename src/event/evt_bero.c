@@ -14,6 +14,9 @@
 #include "manager/evtmgr.h"
 #include "manager/evtmgr_cmd.h"
 #include <string.h>
+#ifdef TARGET_PC
+#include "port/platform.h"
+#endif
 #include "driver/camdrv.h"
 #include "driver/animdrv.h"
 #include "cam_shift.h"
@@ -222,6 +225,12 @@ USER_FUNC(evt_bero_mapchange) {
     EvtWord* args = event->args;
     const char *map, *bero;
 
+#ifdef TARGET_PC
+    if (portSweepMoveActive()) {
+        portSweepMoveNotifyExitBlocked();
+        return EVT_RETURN_DONE;
+    }
+#endif
     map = (const char*)evtGetValue(event, args[0]);
     bero = (const char*)evtGetValue(event, args[1]);
     if (isFirstCall) {
@@ -1364,7 +1373,26 @@ static USER_FUNC(evt_bero_1stcheck) {
  * otherwise stops NPCs, computes the walk, runs the exit script LW(11),
  * and aborts (restarting NPCs) if it returns LW(0) = 1.
  */
+#ifdef TARGET_PC
+static USER_FUNC(evt_bero_sweep_block) {
+    (void)isFirstCall;
+    if (portSweepMoveActive()) {
+        portSweepMoveNotifyExitBlocked();
+        evtSetValue(event, *event->args, 1);
+    } else {
+        evtSetValue(event, *event->args, 0);
+    }
+    return EVT_RETURN_DONE;
+}
+#endif
+
 EVT_BEGIN(bero_case_init_check)
+#ifdef TARGET_PC
+    CALL(evt_bero_sweep_block, LW(0))
+    IF_INT_NOT_EQUAL(LW(0), 0)
+        RETURN
+    END_IF
+#endif
     CALL(evt_bero_exec_onoff, 1, 65536)
     CALL(evt_bero_exec_get, LW(0))
     AND_RAW(LW(0), 1)

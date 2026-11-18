@@ -11,6 +11,7 @@
 #ifdef TARGET_PC
 #include "driver/mapdrv.h"
 #include "port/hud.h"
+#include "port/platform.h"
 #include "port/toggles.h"
 
 extern DispCallback portMapDispObjCb(void);

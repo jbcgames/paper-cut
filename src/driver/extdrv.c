@@ -424,77 +424,92 @@ void extDraw(void) {
 
 #ifdef TARGET_PC
     portInterpKeep(&wp->curTex, sizeof(wp->curTex)); /* as in extPoseDraw */
+    if (wp->poseNum <= 0) {
+        return;
+    }
     {
         const CameraEntry* cam = camGetCurPtr();
         const int isPersp = (cam->projType == GX_PERSPECTIVE);
         const f32 farLim = -(cam->far + 200.0f);
         const f32 tanX = (cam->projection[0][0] > 0.01f) ? (1.6f / cam->projection[0][0]) : 1.5f;
         const f32 tanY = (cam->projection[1][1] > 0.01f) ? (1.25f / cam->projection[1][1]) : 1.0f;
-        ExtdrvPose* batch[64];
-        s32 batchN = 0;
-        s32 batchTex = -1;
-        s32 k;
 
-        GXLoadPosMtxImm((MtxPtr)cam->view, 0);
-        GXSetCurrentMtx(0);
-        GXClearVtxDesc();
-        GXSetVtxDesc(GX_VA_POS, GX_DIRECT);
-        GXSetVtxDesc(GX_VA_TEX0, GX_DIRECT);
-        GXSetVtxAttrFmt(GX_VTXFMT0, GX_VA_POS, GX_POS_XYZ, GX_F32, 0);
-        GXSetVtxAttrFmt(GX_VTXFMT0, GX_VA_TEX0, GX_TEX_ST, GX_F32, 0);
+        /* Batch visible poses per contiguous texId run in world space (1 GXLoadPosMtxImm total) so
+         * 1000-sprite crowds (yuu_03) collapse from ~900+ DL calls and MaxPnMtx=13 splits into <=texNum draws. */
+        {
+            const ExtdrvPose* batch[256];
+            s32 runCount;
+            s32 k;
+            const f32* vtxBase = wp->vtx;
 
-        for (i = 0, sort = wp->sort; i <= wp->poseNum; i++, sort++) {
-            int emitBatch = 0;
-            if (i < wp->poseNum) {
-                pose = &wp->poses[sort->index];
-                if (!(pose->flags & EXT_POSE_FLAG_ACTIVE)) {
-                    continue;
-                }
-                if (isPersp) {
-                    const f32 (*m)[4] = *pose->mtx;
-                    if (!extPointInFrustum(cam, farLim, tanX, tanY, m[0][3], m[1][3], m[2][3])) {
+            GXClearVtxDesc();
+            GXSetVtxDesc(GX_VA_POS, GX_DIRECT);
+            GXSetVtxDesc(GX_VA_TEX0, GX_DIRECT);
+            GXSetVtxAttrFmt(GX_VTXFMT0, GX_VA_POS, GX_POS_XYZ, GX_F32, 0);
+            GXSetVtxAttrFmt(GX_VTXFMT0, GX_VA_TEX0, GX_TEX_ST, GX_F32, 0);
+            GXLoadPosMtxImm((void*)cam->view, 0);
+            GXSetCurrentMtx(0);
+
+            i = 0;
+            sort = wp->sort;
+            while (i < wp->poseNum) {
+                texId = wp->poses[sort[i].index].texId;
+                runCount = 0;
+                while (i < wp->poseNum && wp->poses[sort[i].index].texId == texId && runCount < 256) {
+                    pose = &wp->poses[sort[i].index];
+                    i++;
+                    if (!(pose->flags & EXT_POSE_FLAG_ACTIVE)) {
                         continue;
                     }
-                }
-                texId = pose->texId;
-                if (batchN > 0 && (texId != batchTex || batchN == 64)) {
-                    emitBatch = 1;
-                }
-            } else if (batchN > 0) {
-                emitBatch = 1;
-            }
-
-            if (emitBatch) {
-                const f32* vtx = &wp->vtx[batchTex * 12];
-                if (batchTex != wp->curTex) {
-                    tex = &wp->texs[batchTex];
-                    GXLoadTexObjPreLoaded(smartTexObj(&tex->obj, tex->image), &tex->region, GX_TEXMAP0);
-                    wp->curTex = batchTex;
-                }
-                GXBegin(GX_QUADS, GX_VTXFMT0, (u16)(batchN * 4));
-                for (k = 0; k < batchN; k++) {
-                    const f32 (*m)[4] = *batch[k]->mtx;
-                    s32 c;
-                    for (c = 0; c < 4; c++) {
-                        const f32* lc = &vtx[c * 3];
-                        f32 wx = m[0][0] * lc[0] + m[0][1] * lc[1] + m[0][2] * lc[2] + m[0][3];
-                        f32 wy = m[1][0] * lc[0] + m[1][1] * lc[1] + m[1][2] * lc[2] + m[1][3];
-                        f32 wz = m[2][0] * lc[0] + m[2][1] * lc[1] + m[2][2] * lc[2] + m[2][3];
-                        GXPosition3f32(wx, wy, wz);
-                        GXTexCoord2f32((c == 1 || c == 2) ? 1.0f : 0.0f, (c >= 2) ? 1.0f : 0.0f);
+                    if (isPersp) {
+                        const f32 (*m)[4] = *pose->mtx;
+                        if (!extPointInFrustum(cam, farLim, tanX, tanY, m[0][3], m[1][3], m[2][3])) {
+                            continue;
+                        }
                     }
+                    batch[runCount++] = pose;
                 }
-                GXEnd();
-                batchN = 0;
+                if (runCount == 0) {
+                    continue;
+                }
+                if (texId != wp->curTex) {
+                    tex = &wp->texs[texId];
+                    GXLoadTexObjPreLoaded(smartTexObj(&tex->obj, tex->image), &tex->region, GX_TEXMAP0);
+                    wp->curTex = texId;
+                }
+                {
+                    const f32* q = &vtxBase[texId * 12];
+                    const f32 lx0 = q[0];
+                    const f32 ly0 = q[1];
+                    const f32 lx1 = q[3];
+                    const f32 ly1 = q[7];
+                    GXBegin(GX_QUADS, GX_VTXFMT0, (u16)(runCount * 4));
+                    for (k = 0; k < runCount; k++) {
+                        const f32 (*m)[4] = *batch[k]->mtx;
+                        const f32 tx0 = m[0][0] * lx0 + m[0][3];
+                        const f32 tx1 = m[0][0] * lx1 + m[0][3];
+                        const f32 ty0 = m[1][0] * lx0 + m[1][3];
+                        const f32 ty1 = m[1][0] * lx1 + m[1][3];
+                        const f32 tz0 = m[2][0] * lx0 + m[2][3];
+                        const f32 tz1 = m[2][0] * lx1 + m[2][3];
+                        const f32 dx0 = m[0][1] * ly0, dx1 = m[0][1] * ly1;
+                        const f32 dy0 = m[1][1] * ly0, dy1 = m[1][1] * ly1;
+                        const f32 dz0 = m[2][1] * ly0, dz1 = m[2][1] * ly1;
+                        GXPosition3f32(tx0 + dx0, ty0 + dy0, tz0 + dz0);
+                        GXTexCoord2f32(0.0f, 0.0f);
+                        GXPosition3f32(tx1 + dx0, ty1 + dy0, tz1 + dz0);
+                        GXTexCoord2f32(1.0f, 0.0f);
+                        GXPosition3f32(tx1 + dx1, ty1 + dy1, tz1 + dz1);
+                        GXTexCoord2f32(1.0f, 1.0f);
+                        GXPosition3f32(tx0 + dx1, ty0 + dy1, tz0 + dz1);
+                        GXTexCoord2f32(0.0f, 1.0f);
+                    }
+                    GXEnd();
+                }
             }
-            if (i < wp->poseNum) {
-                batchTex = texId;
-                batch[batchN++] = pose;
-            }
+            extLoadVertex();
+            return;
         }
-        extLoadVertex();
-        (void)mtx;
-        return;
     }
 #else
     for (i = wp->poseNum - 1, sort = wp->sort; i >= 0; i--, sort++) {

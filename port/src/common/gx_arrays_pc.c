@@ -180,24 +180,34 @@ void portGXForgetRange(const void* lo_, const void* hi_) {
     const uint8_t* lo = (const uint8_t*)lo_;
     const uint8_t* hi = (const uint8_t*)hi_;
     unsigned int i;
-    bumpDiscEpoch();
+    int dirty = 0;
+    if (!lo || hi <= lo) {
+        return;
+    }
     for (i = 0; i < sBlobTop; i++) {
-        if (sBlobs[i].base && sBlobs[i].base >= lo && sBlobs[i].base < hi) {
+        if (sBlobs[i].base && sBlobs[i].base < hi &&
+            lo < sBlobs[i].base + (sBlobs[i].size ? sBlobs[i].size : 1u)) {
             sBlobs[i].base = NULL;
             sBlobs[i].size = 0;
+            dirty = 1;
         }
     }
     for (i = 0; i < PORT_GX_ARRAY_REGISTRY; i++) {
         const uint8_t* p = (const uint8_t*)sArrays[i].data;
-        if (p && p >= lo && p < hi) {
+        if (p && p < hi && lo < p + (sArrays[i].size ? sArrays[i].size : 1u)) {
             sArrays[i].data = NULL;
+            dirty = 1;
         }
     }
     for (i = 0; i < PORT_GX_RANGE_RING; i++) {
         const uint8_t* p = (const uint8_t*)sRanges[i].data;
-        if (p && p >= lo && p < hi) {
+        if (p && p < hi && lo < p + (sRanges[i].size ? sRanges[i].size : 1u)) {
             sRanges[i].data = NULL;
+            dirty = 1;
         }
+    }
+    if (dirty) {
+        bumpDiscEpoch();
     }
 }
 

@@ -42,6 +42,11 @@ int portFieldRate(void);
 #include "port/versions.h"
 /* Bring-up trace of sequence/map changes when $TTYD_TRACE is set (trace_pc.c). */
 void portTraceFrame(u32 frame);
+/* Movement sweep mode ($TTYD_SWEEP_MOVE=1, trace_pc.c): enemy evasion, exit/battle suppression. */
+BOOL portSweepMoveActive(void);
+BOOL portSweepNoBattle(void);
+void portSweepMoveNotifyExitBlocked(void);
+void portSweepMovePad(PADStatus* pad);
 /* msgSearch found no message for tag ($TTYD_TRACE logs it once per tag). */
 void portTraceMsgMissing(const char* tag);
 /* a memory card step's result ($TTYD_TRACE, cardmgr.c) */

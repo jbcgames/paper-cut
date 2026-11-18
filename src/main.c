@@ -4,6 +4,7 @@
 #include "mario/mariost.h"
 #include "sdk/DEMOInit.h"
 #ifdef TARGET_PC
+#include "port/platform.h"
 #include "port/toggles.h"
 #endif
 

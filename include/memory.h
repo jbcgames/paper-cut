@@ -71,6 +71,9 @@ GXTexObj* smartTexObj(GXTexObj* obj, void** image_ptr);
 
 void L_smartReInit(void);
 extern BOOL g_bFirstSmartAlloc;
+#ifdef TARGET_PC
+void smartPreDispSync(void);
+#endif
 
 #if VERSION >= VERSION_US
 extern void* R_battlemapalloc_base_ptr;

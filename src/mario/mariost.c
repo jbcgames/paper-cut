@@ -470,6 +470,9 @@ void PORT_HOOKABLE(marioStMain)(void) {
 
 /** Draws the frame through the camera list (camDraw) and clears g_bFirstSmartAlloc after the first drawn frame. */
 void PORT_HOOKABLE(marioStDisp)(void) {
+#ifdef TARGET_PC
+    smartPreDispSync();
+#endif
     camDraw();
 #ifdef TARGET_PC
     portInterpSceneDrawn();
