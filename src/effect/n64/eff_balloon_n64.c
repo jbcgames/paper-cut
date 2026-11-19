@@ -29,6 +29,7 @@ typedef struct EffBalloonN64Work {
 
 void effGetTexObjN64(u32 id, GXTexObj* obj);
 void effSetVtxDescN64(effN64Vtx* vtx);
+void effSetVtxDescN64Sized(effN64Vtx* vtx, u32 count);
 // Unprototyped on purpose: this file passes tri1 its vertex indices as plain ints, without the
 // u16 conversion that eff_n64.h's prototype would add, so it includes only the vertex type.
 // FAKE: local prototype: tri1 is declared without parameters (eff_n64.h: (u16, u16, u16, u16)); this file was compiled with it and the header prototype changes the code.
@@ -238,7 +239,7 @@ static void effBalloonDisp(CameraId cameraId, EffectEntry* effect) {
     GXLoadPosMtxImm(camera->view, GX_PNMTX0);
     GXSetCurrentMtx(GX_PNMTX0);
     GXSetCullMode(GX_CULL_NONE);
-    effSetVtxDescN64(vtx);
+    effSetVtxDescN64Sized(vtx, 32u);
     if (type < 100) {
         GXBegin(GX_TRIANGLES, GX_VTXFMT0, 3);
         tri1(0x15, 2, 1, 0);

@@ -67,6 +67,10 @@ s32 battleAcMain_StickKeepLeft(BattleWork* work) {
     }
     sfx[0] = "SFX_AC_PI1";
     sfx[1] = "SFX_AC_PONE1";
+#ifdef TARGET_PC
+    {
+        const s32 prevState = work->actionCommands.acState;
+#endif
     do {
         loop = 0;
         if (SKL_P(work)->params[3] != 0) {
@@ -227,6 +231,38 @@ s32 battleAcMain_StickKeepLeft(BattleWork* work) {
                 break;
         }
     } while (loop);
+#ifdef TARGET_PC
+    if (prevState != 0) {
+        switch (work->actionCommands.acState) {
+            case 0x63:
+            case 0x64:
+            case 0x3E8:
+                disp->iconStep = -1;
+                goto step_in;
+            case 0x3E9:
+                disp->iconStep = cw->idx - 1;
+            step_in:
+                if (SKL_P(work)->params[3] == 0) {
+                    BattleAcStepSlideIn(disp, -300.0f, 30.0f);
+                } else {
+                    disp->iconX = disp->slideTimer > 0 ? intplGetValue(4, -300.0f, 30.0f, 20 - disp->slideTimer, 20) : 30.0f;
+                }
+                break;
+            case 0x3EA:
+            case 0x3EB:
+            case 0x3EC:
+                disp->iconX = 30.0f;
+                break;
+            case 0x3ED:
+            case 0x3EE:
+                if (SKL_P(work)->params[3] == 0) {
+                    BattleAcStepSlideOut(disp, 30.0f, -300.0f);
+                }
+                break;
+        }
+    }
+    }
+#endif
     return 1;
 }
 
@@ -250,20 +286,30 @@ void battleAcDisp_StickKeepLeft(CameraId camId, void* param) {
         case 0x63:
         case 0x64:
         case 0x3E8:
+#ifndef TARGET_PC
             disp->iconStep = -1;
             disp->iconX = intplGetValue(4, -300.0f, 30.0f, 20 - disp->slideTimer, 20);
+#endif
             actionCommandDisp(disp->iconX, disp->iconY, disp->iconStep);
+#ifndef TARGET_PC
             if (SKL_P(work)->params[3] == 0 && disp->slideTimer > 0) {
                 disp->slideTimer--;
             }
+#endif
             break;
         case 0x3E9:
+#ifndef TARGET_PC
             disp->iconStep = cw->idx - 1;
             disp->iconX = intplGetValue(4, -300.0f, 30.0f, 20 - disp->slideTimer, 20);
+#else
+            (void)cw;
+#endif
             actionCommandDisp(disp->iconX, disp->iconY, disp->iconStep);
+#ifndef TARGET_PC
             if (SKL_P(work)->params[3] == 0 && disp->slideTimer > 0) {
                 disp->slideTimer--;
             }
+#endif
             break;
         case 0x3EA:
         case 0x3EB:
@@ -272,15 +318,19 @@ void battleAcDisp_StickKeepLeft(CameraId camId, void* param) {
             break;
         case 0x3ED:
         case 0x3EE:
+#ifndef TARGET_PC
             if (disp->slideTimer >= 40) {
                 disp->iconX = intplGetValue(4, 30.0f, -300.0f, disp->slideTimer - 40, 20);
             } else {
                 disp->iconX = 30.0f;
             }
+#endif
             actionCommandDisp(disp->iconX, disp->iconY, disp->iconStep);
+#ifndef TARGET_PC
             if (SKL_P(work)->params[3] == 0 && disp->slideTimer < 60) {
                 disp->slideTimer++;
             }
+#endif
             break;
     }
 }

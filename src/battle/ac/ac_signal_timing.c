@@ -124,6 +124,10 @@ s32 battleAcMain_SignalTiming(BattleWork* work) {
     sfxPone = "SFX_AC_PONE1";
     sfxOk = "SFX_AC_COMMAND_OK1";
     sfxNg2 = sfxNg = "SFX_AC_COMMAND_NG1";
+#ifdef TARGET_PC
+    {
+        const s32 prevState = ac->acState;
+#endif
     do {
         loop = 0;
         got = 0;
@@ -371,6 +375,25 @@ s32 battleAcMain_SignalTiming(BattleWork* work) {
         }
 
     } while (loop);
+#ifdef TARGET_PC
+    if (prevState != 0) {
+        switch (ac->acState) {
+            case 99:
+            case 100:
+            case 1000:
+            case 1001:
+            case 1002:
+            case 1003:
+                BattleAcStepSlideIn(disp, -300.0f, 30.0f);
+                break;
+            case 1004:
+            case 1005:
+                BattleAcStepSlideOut(disp, 30.0f, -300.0f);
+                break;
+        }
+    }
+    }
+#endif
     return 1;
 }
 
@@ -390,29 +413,41 @@ void battleAcDisp_SignalTiming(CameraId cameraId, BattleWork* work) {
     switch (ac->acState) {
         case 99:
         case 100:
+#ifndef TARGET_PC
             disp->iconX = intplGetValue(4, -300.0f, 30.0f, 20 - disp->slideTimer, 20);
+#endif
             actionCommandDisp(disp->iconX, disp->iconY);
+#ifndef TARGET_PC
             if (disp->slideTimer > 0) {
                 disp->slideTimer--;
             }
+#endif
             break;
         case 1000:
         case 1001:
         case 1002:
         case 1003:
+#ifndef TARGET_PC
             actionCommandDisp(30.0f, 0.0f);
+#else
+            actionCommandDisp(disp->iconX, disp->iconY);
+#endif
             break;
         case 1004:
         case 1005:
+#ifndef TARGET_PC
             if (disp->slideTimer >= 40) {
                 disp->iconX = intplGetValue(4, 30.0f, -300.0f, disp->slideTimer - 40, 20);
             } else {
                 disp->iconX = 30.0f;
             }
+#endif
             actionCommandDisp(disp->iconX, disp->iconY);
+#ifndef TARGET_PC
             if (disp->slideTimer < 60) {
                 disp->slideTimer++;
             }
+#endif
             break;
     }
 }

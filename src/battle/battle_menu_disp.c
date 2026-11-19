@@ -914,6 +914,40 @@ static void DrawSubIconSub(BattleSubMenu* menu, s32 i, Mtx m, s32 enabled, u16 i
  * between the two with the SFX_BTL_SYS_CAUTION_THROW1 sound as it starts,
  * or above Mario without a sound if he has no partner.
  */
+static void DrawMenuPartyChangeButton(void);
+
+#ifdef TARGET_PC
+static void stepMenuPartyChangeButton(BattleWork* wp) {
+    BattleSubMenu* menu = WP_SUBMENU(wp);
+    BattleUnit* party;
+    s32 id;
+    f32 ix;
+    f32 iy;
+    f32 iz;
+
+    if (!menu) {
+        return;
+    }
+    party = BattleGetPartyPtr(wp);
+    BattleAudience_GetItemOn(&id, &ix, &iy, &iz, NULL);
+    if (id != -1) {
+        if (party && menu->partyBtnAngle == 90.0f) {
+            psndSFXOn("SFX_BTL_SYS_CAUTION_THROW1");
+        }
+        if (menu->partyBtnAngle > 0.0f) {
+            menu->partyBtnAngle -= 5.0f;
+            if (menu->partyBtnAngle < 0.0f) {
+                menu->partyBtnAngle = 0.0f;
+            }
+        } else {
+            menu->partyBtnAngle = 0.0f;
+        }
+    } else {
+        menu->partyBtnAngle = 90.0f;
+    }
+}
+#endif
+
 static void DrawMenuPartyChangeButton(void) {
     Vec p;
     Vec q;
@@ -939,15 +973,19 @@ static void DrawMenuPartyChangeButton(void) {
     if (!party) {
         BattleAudience_GetItemOn(&id, &ix, &iy, &iz, NULL);
         if (id != -1) {
+#ifndef TARGET_PC
             if (menu->partyBtnAngle > 0.0f) {
                 menu->partyBtnAngle -= 5.0f;
             } else {
                 menu->partyBtnAngle = 0.0f;
             }
+#endif
             btlGetScreenPoint(&mario->position, &p);
             DrawMenuPartyChangeButton_Sub(5, p.x, p.y - 20.0f, menu->partyBtnAngle);
         } else {
+#ifndef TARGET_PC
             menu->partyBtnAngle = 90.0f;
+#endif
         }
     } else {
         btlGetScreenPoint(&mario->position, &p);
@@ -956,6 +994,7 @@ static void DrawMenuPartyChangeButton(void) {
         y = p.y;
         BattleAudience_GetItemOn(&id, &ix, &iy, &iz, NULL);
         if (id != -1) {
+#ifndef TARGET_PC
             if (menu->partyBtnAngle == 90.0f) {
                 psndSFXOn("SFX_BTL_SYS_CAUTION_THROW1");
             }
@@ -964,9 +1003,12 @@ static void DrawMenuPartyChangeButton(void) {
             } else {
                 menu->partyBtnAngle = 0.0f;
             }
+#endif
             DrawMenuPartyChangeButton_Sub(5, x, y - 20.0f, menu->partyBtnAngle);
         } else {
+#ifndef TARGET_PC
             menu->partyBtnAngle = 90.0f;
+#endif
             if (BattleCommandCheckChangePositionEnable(wp)) {
                 DrawMenuPartyChangeButton_Sub(4, x, y - 20.0f, 0.0f);
             }
@@ -1320,6 +1362,7 @@ static void DrawMenuCursorAndScrollArrow(const Vec* v) {
     s32 n;
 
     bob = intplGetValue(4, 0.0f, 10.0f, menu->bobTimer, 6);
+#ifndef TARGET_PC
     menu->bobTimer++;
 #if VERSION >= VERSION_US
     if (menu->bobTimer >= gp->framerate * 12 / 60) {
@@ -1328,6 +1371,7 @@ static void DrawMenuCursorAndScrollArrow(const Vec* v) {
 #endif
         menu->bobTimer = 0;
     }
+#endif
     if (cursor->relPos > 0) {
         pos.x = 155.0f + v->x;
         pos.y = 15.0f + v->y + bob;
@@ -1358,6 +1402,10 @@ static void DrawMenuCursorAndScrollArrow(const Vec* v) {
  * sets every row to flip in one frame after the row above,
  * and returns the acting unit's command-ring cursor (Mario's or the partner's) through mainCursor.
  */
+#ifdef TARGET_PC
+static s32 sSubMenuSkipFirstStep;
+#endif
+
 static void InitSubMenuCommonProcess(BattleSubMenu** out, BattleCursor** mainCursor, BattleCursor* cursor) {
     BattleWork* wp = _battleWorkPointer;
     s32 i;
@@ -1384,6 +1432,9 @@ static void InitSubMenuCommonProcess(BattleSubMenu** out, BattleCursor** mainCur
         (*out)->rowTimer[i] = -i;
         (*out)->reserved_F8[i] = 0;
     }
+#ifdef TARGET_PC
+    sSubMenuSkipFirstStep = 1;
+#endif
 }
 
 /**
@@ -1487,14 +1538,10 @@ static void DrawSubMenuCommonProcessSub1(BattleSubMenu* menu, BattleCursor* curs
  * the ring icons leaving for the bubble (filling a, b and c with their matrices, positions and angles)
  * and the rows flipping in (d). Returns the help window position in x, y.
  */
-static void DrawSubMenuCommonProcess(f32* x, f32* y, Mtx* a, Vec* b, f32* c, Mtx* d) {
-    Mtx tm;
-    Mtx sm;
-    f32 ox;
-    f32 oy;
-    BattleWork* wp = _battleWorkPointer;
+#ifdef TARGET_PC
+static void stepSubMenuState(BattleWork* wp) {
     BattleSubMenu* menu = WP_SUBMENU(wp);
-    BattleCursor* cursor = menu->cursor;
+    BattleCursor* cursor;
     BattleCursor* mainCursor;
     s32 steps;
     s32 prev;
@@ -1502,10 +1549,15 @@ static void DrawSubMenuCommonProcess(f32* x, f32* y, Mtx* a, Vec* b, f32* c, Mtx
     s32 cnt;
     s32 cnt2;
     s32 i;
-    f32 ang;
-    f32 s;
     s32 sw;
+    s32 skipTimers;
 
+    if (!menu || !menu->cursor) {
+        return;
+    }
+    skipTimers = sSubMenuSkipFirstStep;
+    sSubMenuSkipFirstStep = 0;
+    cursor = menu->cursor;
     if (BattleGetUnitPtr(wp, wp->activeUnitId)->currentKind == UNIT_MARIO) {
         mainCursor = &wp->commandMenu.cursor[0];
     } else {
@@ -1524,8 +1576,6 @@ static void DrawSubMenuCommonProcess(f32* x, f32* y, Mtx* a, Vec* b, f32* c, Mtx
     if (cursor->relPos >= cursor->count - n) {
         cursor->relPos = cursor->count - n;
     }
-    *x = -200.0f;
-    *y = -100.0f;
     switch (sw = menu->scrollState) {
         case 0:
             menu->shown = 1;
@@ -1571,6 +1621,155 @@ static void DrawSubMenuCommonProcess(f32* x, f32* y, Mtx* a, Vec* b, f32* c, Mtx
             DrawSubMenuCommonProcessSub1(menu, cursor, prev, n);
             break;
     }
+    if (skipTimers) {
+        return;
+    }
+    menu->bobTimer++;
+#if VERSION >= VERSION_US
+    if (menu->bobTimer >= gp->framerate * 12 / 60) {
+#else
+    if (menu->bobTimer >= 12) {
+#endif
+        menu->bobTimer = 0;
+    }
+    for (i = 0; i < mainCursor->count; i++) {
+        switch (menu->iconState[i]) {
+            case 0:
+                menu->iconTimer[i]++;
+                if (menu->iconTimer[i] > FPS_FRAMES(12)) {
+                    menu->iconState[i] = 1;
+                }
+                break;
+            case 10:
+                menu->iconTimer[i]++;
+                if (1.0f - 0.1f * menu->iconTimer[i] <= 0.0f) {
+                    menu->iconState[i] = 11;
+                }
+                break;
+        }
+    }
+    for (i = 0; i < 7; i++) {
+        switch (sw = menu->rowState[i]) {
+            case 1:
+                menu->rowTimer[i]++;
+                if (menu->rowTimer[i] > FPS_FRAMES(12)) {
+                    menu->rowState[i] = 2;
+                }
+                break;
+            case 10:
+            case 20:
+            case 30:
+            case 40:
+                steps = 12;
+                if (sw == 30 || sw == 40) {
+                    steps = (cursor->count - 6) / 2 + 12;
+                }
+                menu->scrollPos = intplGetValue(4, menu->scrollFrom, menu->scrollTo, menu->rowTimer[i], steps);
+                menu->rowTimer[i]++;
+                if (menu->rowTimer[i] > steps) {
+                    menu->rowState[i] = 2;
+                    menu->rowTimer[i] = 0;
+                }
+                break;
+        }
+    }
+}
+#endif
+
+static void DrawSubMenuCommonProcess(f32* x, f32* y, Mtx* a, Vec* b, f32* c, Mtx* d) {
+    Mtx tm;
+    Mtx sm;
+    f32 ox;
+    f32 oy;
+    BattleWork* wp = _battleWorkPointer;
+    BattleSubMenu* menu = WP_SUBMENU(wp);
+    BattleCursor* cursor = menu->cursor;
+    BattleCursor* mainCursor;
+    s32 steps = 0;
+    s32 prev;
+    s32 n;
+    s32 cnt;
+    s32 cnt2;
+    s32 i;
+    f32 ang;
+    f32 s;
+    s32 sw;
+
+    (void)steps;
+    (void)prev;
+    (void)n;
+    (void)cnt;
+    (void)cnt2;
+
+    if (BattleGetUnitPtr(wp, wp->activeUnitId)->currentKind == UNIT_MARIO) {
+        mainCursor = &wp->commandMenu.cursor[0];
+    } else {
+        mainCursor = &wp->commandMenu.cursor[1];
+    }
+#ifndef TARGET_PC
+    n = (6 <= cursor->count) ? 6 : cursor->count;
+    prev = cursor->relPos;
+    if (cursor->absPos <= cursor->relPos) {
+        cursor->relPos = cursor->absPos - 1;
+    } else if (cursor->absPos >= cursor->relPos + n - 1) {
+        cursor->relPos = cursor->absPos - n + 2;
+    }
+    if (cursor->relPos < 0) {
+        cursor->relPos = 0;
+    }
+    if (cursor->relPos >= cursor->count - n) {
+        cursor->relPos = cursor->count - n;
+    }
+#endif
+    *x = -200.0f;
+    *y = -100.0f;
+#ifndef TARGET_PC
+    switch (sw = menu->scrollState) {
+        case 0:
+            menu->shown = 1;
+            menu->scrollPos = cursor->relPos;
+            cnt = 0;
+            for (i = 0; i < mainCursor->count; i++) {
+                if (menu->iconState[i] == 1 || menu->iconState[i] == 11) {
+                    cnt++;
+                }
+            }
+            for (i = 0, cnt2 = 0; i < 7; i++) {
+                if (menu->rowState[i] == 2) {
+                    cnt2++;
+                }
+            }
+            if (cnt == mainCursor->count && cnt2 == 7) {
+                menu->scrollState = 2;
+            }
+            DrawSubMenuCommonProcessSub1(menu, cursor, prev, n);
+            break;
+        case 2:
+            menu->shown = 1;
+            menu->scrollPos = cursor->relPos;
+            DrawSubMenuCommonProcessSub1(menu, cursor, prev, n);
+            break;
+        case 10:
+        case 20:
+        case 30:
+        case 40:
+            if (sw == 10 || sw == 20) {
+                menu->shown = 1;
+            }
+            cnt = 0;
+            for (i = 0; i < 7; i++) {
+                if (menu->rowState[i] == 2) {
+                    cnt++;
+                }
+            }
+            if (cnt == 7) {
+                menu->scrollState = 2;
+                menu->scrollPos = cursor->relPos;
+            }
+            DrawSubMenuCommonProcessSub1(menu, cursor, prev, n);
+            break;
+    }
+#endif
     menu->iconsArrived = 0;
     for (i = 0; i < mainCursor->count; i++) {
         switch (menu->iconState[i]) {
@@ -1581,22 +1780,28 @@ static void DrawSubMenuCommonProcess(f32* x, f32* y, Mtx* a, Vec* b, f32* c, Mtx
                 {
                     f32 px = b[i].x;
                     f32 py;
-                    b[i].x = intplGetValue(4, px, -60.0f, menu->iconTimer[i], FPS_FRAMES(12));
+                    s32 t = menu->iconTimer[i];
+                    if (t > FPS_FRAMES(12)) {
+                        t = FPS_FRAMES(12);
+                    }
+                    b[i].x = intplGetValue(4, px, -60.0f, t, FPS_FRAMES(12));
                     py = b[i].y;
-                    b[i].y = intplGetValue(4, py, 55.0f, menu->iconTimer[i], FPS_FRAMES(12));
+                    b[i].y = intplGetValue(4, py, 55.0f, t, FPS_FRAMES(12));
+                    PSMTXTrans(a[i], 20.0f + b[i].x, b[i].y, b[i].z);
+                    c[i] = intplGetValue(0, 0.0f, 360.0f, t, FPS_FRAMES(12));
                 }
-                PSMTXTrans(a[i], 20.0f + b[i].x, b[i].y, b[i].z);
-                c[i] = intplGetValue(0, 0.0f, 360.0f, menu->iconTimer[i], FPS_FRAMES(12));
                 if (c[i] > 360.0f) {
                     c[i] -= 360.0f;
                 }
                 if (menu->iconTimer[i] >= 3) {
                     menu->iconsArrived = 1;
                 }
+#ifndef TARGET_PC
                 menu->iconTimer[i]++;
                 if (menu->iconTimer[i] > FPS_FRAMES(12)) {
                     menu->iconState[i] = 1;
                 }
+#endif
                 break;
             case 1:
                 menu->iconFlags[i] |= 1;
@@ -1616,13 +1821,18 @@ static void DrawSubMenuCommonProcess(f32* x, f32* y, Mtx* a, Vec* b, f32* c, Mtx
                 b[i].z = oy;
                 s = 1.0f - 0.1f * menu->iconTimer[i];
                 if (s <= 0.0f) {
+#ifndef TARGET_PC
                     menu->iconState[i] = 11;
+#endif
+                    s = 0.0f;
                 }
                 PSMTXScale(sm, s, s, 1.0f);
                 PSMTXTrans(tm, b[i].x, b[i].y, b[i].z);
                 PSMTXConcat(tm, sm, a[i]);
                 c[i] = 0.0f;
+#ifndef TARGET_PC
                 menu->iconTimer[i]++;
+#endif
                 break;
             case 11:
                 menu->iconFlags[i] &= ~1;
@@ -1639,14 +1849,20 @@ static void DrawSubMenuCommonProcess(f32* x, f32* y, Mtx* a, Vec* b, f32* c, Mtx
                 menu->rowFlags[i] &= ~1;
                 menu->reserved_114[i] = 0xFF;
                 if (menu->rowTimer[i] >= 0 && i != 6) {
-                    s = intplGetValue(0, 90.0f, 0.0f, menu->rowTimer[i], FPS_FRAMES(12));
+                    s32 t = menu->rowTimer[i];
+                    if (t > FPS_FRAMES(12)) {
+                        t = FPS_FRAMES(12);
+                    }
+                    s = intplGetValue(0, 90.0f, 0.0f, t, FPS_FRAMES(12));
                     menu->rowFlags[i] |= 1;
                     PSMTXRotRad(d[i], 'y', 0.017453292f * s);
                 }
+#ifndef TARGET_PC
                 menu->rowTimer[i]++;
                 if (menu->rowTimer[i] > FPS_FRAMES(12)) {
                     menu->rowState[i] = 2;
                 }
+#endif
                 break;
             case 2:
                 menu->reserved_114[i] = 0xFF;
@@ -1669,12 +1885,14 @@ static void DrawSubMenuCommonProcess(f32* x, f32* y, Mtx* a, Vec* b, f32* c, Mtx
                 }
                 menu->rowFlags[i] |= 1;
                 PSMTXIdentity(d[i]);
+#ifndef TARGET_PC
                 menu->scrollPos = intplGetValue(4, menu->scrollFrom, menu->scrollTo, menu->rowTimer[i], steps);
                 menu->rowTimer[i]++;
                 if (menu->rowTimer[i] > steps) {
                     menu->rowState[i] = 2;
                     menu->rowTimer[i] = 0;
                 }
+#endif
                 break;
         }
     }
@@ -1742,8 +1960,163 @@ void PORT_HOOKABLE(BattleMenuDisp_ActSelect_Init)(BattleWork* wp, BattleCursor* 
     }
 }
 
-/** Per-frame update of the command ring; empty, as the animation runs in DrawMainMenu. */
+#ifdef TARGET_PC
+static void stepMainMenuState(BattleWork* wp) {
+    BattleSubMenu* menu = WP_SUBMENU(wp);
+    BattleCursor* cursor;
+    BattleCursor* mc;
+    s32 i;
+    s32 n;
+    s32 diff;
+    f32 a;
+    f32 b;
+    f32 c;
+
+    stepMenuPartyChangeButton(wp);
+    if (!menu || !menu->cursor) {
+        return;
+    }
+    cursor = menu->cursor;
+    switch (menu->scrollState) {
+        case 0:
+            n = 0;
+            for (i = 0; i < cursor->count; i++) {
+                if (menu->iconState[i] == 3) {
+                    n++;
+                }
+            }
+            if (n == cursor->count) {
+                menu->scrollState = 1;
+            }
+            break;
+        case 1:
+            menu->shown = 1;
+            mc = menu->cursor;
+            diff = mc->absPos - menu->prevAbsPos;
+            if (diff == 1 || -(mc->count - 1) == diff) {
+                menu->scrollState = 2;
+                menu->shown = 0;
+                menu->prevAbsPos = menu->cursor->absPos;
+                for (i = 0; i < cursor->count; i++) {
+                    menu->iconState[i] = 4;
+                    menu->iconTimer[i] = 0;
+                    menu->iconTimer[i + 10] = menu->iconSlot[i];
+                    menu->iconSlot[i]--;
+                    if (menu->iconSlot[i] == -1) {
+                        menu->iconSlot[i] = cursor->count - 1;
+                    }
+                }
+            } else if (diff == -1 || mc->count - 1 == diff) {
+                menu->scrollState = 2;
+                menu->shown = 0;
+                menu->prevAbsPos = menu->cursor->absPos;
+                for (i = 0; i < cursor->count; i++) {
+                    menu->iconState[i] = 5;
+                    menu->iconTimer[i] = 0;
+                    menu->iconTimer[i + 10] = menu->iconSlot[i];
+                    menu->iconSlot[i]++;
+                    if (menu->iconSlot[i] == cursor->count) {
+                        menu->iconSlot[i] = 0;
+                    }
+                }
+            }
+            break;
+        case 2:
+            n = 0;
+            for (i = 0; i < cursor->count; i++) {
+                if (menu->iconState[i] == 3) {
+                    n++;
+                }
+            }
+            if (n == cursor->count) {
+                menu->scrollState = 1;
+            }
+            break;
+        case 10:
+            menu->scrollState = 1;
+            menu->shown = 1;
+            break;
+    }
+
+    for (i = 0; i < cursor->count; i++) {
+        switch (menu->iconState[i]) {
+            case 0:
+                menu->iconTimer[i] -= portBattleMenuStep();
+                if (menu->iconTimer[i] <= 0) {
+                    menu->iconState[i] = 1;
+                    menu->iconTimer[i] = 0;
+                }
+                break;
+            case 1:
+#if VERSION >= VERSION_US
+                a = menu->iconTimer[i] * (12.0f / gp->framerate);
+#else
+                a = 0.2f * menu->iconTimer[i];
+#endif
+                b = 3.1415927f * kakutable[cursor->count - 3][menu->iconSlot[i]] / 180.0f;
+                if (a >= b && menu->iconTimer[i] >= FPS_FRAMES(10)) {
+                    menu->iconState[i] = 3;
+                    menu->iconTimer[i] = -1;
+                }
+                menu->iconTimer[i] += portBattleMenuStep();
+                break;
+            case 4:
+                c = kakutable[cursor->count - 3][menu->iconTimer[i + 10]];
+                b = kakutable[cursor->count - 3][menu->iconSlot[i]];
+                if (0.0f == b) {
+                    b = 360.0f;
+                }
+#if VERSION >= VERSION_US
+                a = 3.1415927f * c / 180.0f + menu->iconTimer[i] * (12.0f / gp->framerate);
+#else
+                a = 3.1415927f * c / 180.0f + 0.2f * menu->iconTimer[i];
+#endif
+                b = 3.1415927f * b / 180.0f;
+                if (a >= b) {
+                    menu->iconState[i] = 3;
+                    menu->iconTimer[i] = -1;
+                }
+                menu->iconTimer[i] += portBattleMenuStep();
+                break;
+            case 5:
+                c = kakutable[cursor->count - 3][menu->iconTimer[i + 10]];
+                if (0.0f == c) {
+                    c = 360.0f;
+                }
+#if VERSION >= VERSION_US
+                a = 3.1415927f * c / 180.0f - menu->iconTimer[i] * (12.0f / gp->framerate);
+#else
+                a = 3.1415927f * c / 180.0f - 0.2f * menu->iconTimer[i];
+#endif
+                b = 3.1415927f * kakutable[cursor->count - 3][menu->iconSlot[i]] / 180.0f;
+                if (a <= b) {
+                    menu->iconState[i] = 3;
+                    menu->iconTimer[i] = -1;
+                }
+                menu->iconTimer[i] += portBattleMenuStep();
+                break;
+            case 10:
+                menu->iconTimer[i]++;
+                if (menu->iconTimer[i] > FPS_FRAMES(12)) {
+                    menu->iconState[i] = 3;
+                }
+                break;
+            case 11:
+                if (0.1f * menu->iconTimer[i] >= 1.0f) {
+                    menu->iconState[i] = 3;
+                }
+                menu->iconTimer[i]++;
+                break;
+        }
+    }
+}
+#endif
+
+/** Per-frame update of the command ring; steps menu animation at 60 Hz on PC. */
 void PORT_HOOKABLE(BattleMenuDisp_ActSelect_Main)(BattleWork* wp) {
+#ifdef TARGET_PC
+    stepMainMenuState(wp);
+#endif
 }
 
 /** Draw callback of the command ring. */
@@ -1789,8 +2162,12 @@ void DrawMainMenu(BattleWork* wp_) {
     /* the ring's scroll and icon animation step in this draw */
     portInterpKeep(menu, sizeof(*menu));
     portInterpKeep(cursor, sizeof(*cursor));
+    (void)n;
+    (void)diff;
+    (void)mc;
 #endif
     camGetPtr(CAMERA_2D);
+#ifndef TARGET_PC
     switch (menu->scrollState) {
         case 0:
             n = 0;
@@ -1852,20 +2229,19 @@ void DrawMainMenu(BattleWork* wp_) {
             menu->shown = 1;
             break;
     }
+#endif
 
     menu->iconsArrived = 0;
     for (i = 0; i < cursor->count; i++) {
         switch (menu->iconState[i]) {
             case 0:
-                #ifdef TARGET_PC
-                menu->iconTimer[i] -= portBattleMenuStep(); // Enhancements faster battle menus
-                #else
+#ifndef TARGET_PC
                 menu->iconTimer[i]--;
-                #endif
                 if (menu->iconTimer[i] <= 0) {
                     menu->iconState[i] = 1;
                     menu->iconTimer[i] = 0;
                 }
+#endif
                 break;
             case 1:
                 menu->iconFlags[i] |= 1;
@@ -1903,15 +2279,13 @@ void DrawMainMenu(BattleWork* wp_) {
                     PSMTXConcat(trans, rot, mtx[i]);
                 }
                 z[i] = 0.0f;
+#ifndef TARGET_PC
                 if (a >= b && menu->iconTimer[i] >= FPS_FRAMES(10)) {
                     menu->iconState[i] = 3;
                     menu->iconTimer[i] = -1;
                 }
-                #ifdef TARGET_PC
-                menu->iconTimer[i] += portBattleMenuStep(); // Enhancements faster battle menus
-                #else
                 menu->iconTimer[i]++;
-                #endif
+#endif
                 break;
             case 3:
                 a = 3.1415927f * kakutable[cursor->count - 3][menu->iconSlot[i]] / 180.0f;
@@ -1942,8 +2316,10 @@ void DrawMainMenu(BattleWork* wp_) {
                 b = 3.1415927f * b / 180.0f;
                 if (a >= b) {
                     a = b;
+#ifndef TARGET_PC
                     menu->iconState[i] = 3;
                     menu->iconTimer[i] = -1;
+#endif
                 }
                 GetRingCenter(&pos[i]);
                 GetRingOffset(a, &ox, &oy);
@@ -1953,11 +2329,9 @@ void DrawMainMenu(BattleWork* wp_) {
                 PSMTXTrans(mtx[i], pos[i].x, pos[i].y, pos[i].z);
                 z[i] = 0.0f;
                 menu->iconFlags[i] &= ~2;
-                #ifdef TARGET_PC
-                menu->iconTimer[i] += portBattleMenuStep(); // Enhancements faster battle menus
-                #else
+#ifndef TARGET_PC
                 menu->iconTimer[i]++;
-                #endif
+#endif
                 break;
             case 5:
                 c = kakutable[cursor->count - 3][menu->iconTimer[i + 10]];
@@ -1972,8 +2346,10 @@ void DrawMainMenu(BattleWork* wp_) {
                 b = 3.1415927f * kakutable[cursor->count - 3][menu->iconSlot[i]] / 180.0f;
                 if (a <= b) {
                     a = b;
+#ifndef TARGET_PC
                     menu->iconState[i] = 3;
                     menu->iconTimer[i] = -1;
+#endif
                 }
                 GetRingCenter(&pos[i]);
                 GetRingOffset(a, &ox, &oy);
@@ -1983,11 +2359,9 @@ void DrawMainMenu(BattleWork* wp_) {
                 PSMTXTrans(mtx[i], pos[i].x, pos[i].y, pos[i].z);
                 z[i] = 0.0f;
                 menu->iconFlags[i] &= ~2;
-                #ifdef TARGET_PC
-                menu->iconTimer[i] += portBattleMenuStep(); // Enhancements faster battle menus
-                #else
+#ifndef TARGET_PC
                 menu->iconTimer[i]++;
-                #endif
+#endif
                 break;
             case 10:
                 menu->iconFlags[i] |= 1;
@@ -1997,14 +2371,22 @@ void DrawMainMenu(BattleWork* wp_) {
                 pos[i].x += ox;
                 pos[i].y += oy;
                 pos[i].z = oy;
-                pos[i].x = intplGetValue(4, -60.0f, pos[i].x, menu->iconTimer[i], FPS_FRAMES(12));
-                pos[i].y = intplGetValue(4, 55.0f, pos[i].y, menu->iconTimer[i], FPS_FRAMES(12));
-                PSMTXTrans(mtx[i], 20.0f + pos[i].x, pos[i].y, pos[i].z);
-                z[i] = intplGetValue(0, 360.0f, 0.0f, menu->iconTimer[i], FPS_FRAMES(12));
+                {
+                    s32 t = menu->iconTimer[i];
+                    if (t > FPS_FRAMES(12)) {
+                        t = FPS_FRAMES(12);
+                    }
+                    pos[i].x = intplGetValue(4, -60.0f, pos[i].x, t, FPS_FRAMES(12));
+                    pos[i].y = intplGetValue(4, 55.0f, pos[i].y, t, FPS_FRAMES(12));
+                    PSMTXTrans(mtx[i], 20.0f + pos[i].x, pos[i].y, pos[i].z);
+                    z[i] = intplGetValue(0, 360.0f, 0.0f, t, FPS_FRAMES(12));
+                }
+#ifndef TARGET_PC
                 menu->iconTimer[i]++;
                 if (menu->iconTimer[i] > FPS_FRAMES(12)) {
                     menu->iconState[i] = 3;
                 }
+#endif
                 break;
             case 11:
                 menu->iconFlags[i] |= 1;
@@ -2017,13 +2399,18 @@ void DrawMainMenu(BattleWork* wp_) {
                 pos[i].z = oy;
                 a = 0.1f * menu->iconTimer[i];
                 if (a >= 1.0f) {
+#ifndef TARGET_PC
                     menu->iconState[i] = 3;
+#endif
+                    a = 1.0f;
                 }
                 PSMTXScale(scale, a, a, 1.0f);
                 PSMTXTrans(trans, pos[i].x, pos[i].y, pos[i].z);
                 PSMTXConcat(trans, scale, mtx[i]);
                 z[i] = 0.0f;
+#ifndef TARGET_PC
                 menu->iconTimer[i]++;
+#endif
                 break;
         }
     }
@@ -2056,8 +2443,11 @@ void PORT_HOOKABLE(BattleMenuDisp_WeaponSelect_Init)(BattleWork* wp, BattleCurso
     }
 }
 
-/** Per-frame update of the move list; empty. */
+/** Per-frame update of the move list; steps submenu animation at 60 Hz on PC. */
 void PORT_HOOKABLE(BattleMenuDisp_WeaponSelect_Main)(BattleWork* wp) {
+#ifdef TARGET_PC
+    stepSubMenuState(wp);
+#endif
 }
 
 /** Draw callback of the move list. */
@@ -2172,8 +2562,11 @@ void PORT_HOOKABLE(BattleMenuDisp_Operation_Init)(BattleWork* wp, BOOL flag) {
     }
 }
 
-/** Per-frame update of the Tactics list; empty. */
+/** Per-frame update of the Tactics list; steps submenu animation at 60 Hz on PC. */
 void PORT_HOOKABLE(BattleMenuDisp_Operation_Main)(BattleWork* wp) {
+#ifdef TARGET_PC
+    stepSubMenuState(wp);
+#endif
 }
 
 /** Draw callback of the Tactics list. */
@@ -2263,8 +2656,11 @@ void PORT_HOOKABLE(BattleMenuDisp_ChangePartySelect_Init)(BattleWork* wp, BOOL f
     }
 }
 
-/** Per-frame update of the Change Partner list; empty. */
+/** Per-frame update of the Change Partner list; steps submenu animation at 60 Hz on PC. */
 void PORT_HOOKABLE(BattleMenuDisp_ChangePartySelect_Main)(BattleWork* wp) {
+#ifdef TARGET_PC
+    stepSubMenuState(wp);
+#endif
 }
 
 /** Draw callback of the Change Partner list. */
@@ -2348,8 +2744,11 @@ void PORT_HOOKABLE(BattleMenuDisp_MultiItem_Init)(BattleWork* wp, BOOL flag) {
     }
 }
 
-/** Per-frame update of the Double/Triple Dip list; empty. */
+/** Per-frame update of the Double/Triple Dip list; steps submenu animation at 60 Hz on PC. */
 void PORT_HOOKABLE(BattleMenuDisp_MultiItem_Main)(BattleWork* wp) {
+#ifdef TARGET_PC
+    stepSubMenuState(wp);
+#endif
 }
 
 /** Draw callback of the Double/Triple Dip list. */

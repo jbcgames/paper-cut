@@ -133,11 +133,22 @@ Binario Release final limpio (sin hooks de perfilado temporal): `build-aarch64/t
   - `src/driver/extdrv.c` y `src/driver/mapdrv.c`: culling por frustum (`extPointInFrustum`) y envío en lotes por textura en `extDraw`/`extDrawShadow`, más omisión temprana de nodos ocultos o vacíos en `_mapDispMapObj`.
 - **Verificación en RK3326**: barrido completo en dos pasadas sobre las 271 escenas (`0` cierres y `0` regresiones visuales en la segunda pasada), más re-verificación del Archivo 2 (`gor_01`) y el final del Acto 1 (`aji_10`).
 
+### 6. `v0.5.0-rk3326`
+
+- **Barrido de movilidad en 271/271 escenas (`TTYD_SWEEP_MOVE=1`, Pass 2 en modo 60 Hz)** y optimizaciones RK3326/Mali-G31 (`memory.c`/`smartPreDispSync()`, `gx_arrays_pc.c`, `extdrv.c`, `yuu_03.c`, culling homogéneo de 6 planos `mapClipBoxVisible` en `mapdrv.c` y `eff_fire.c`; en Aurora: `kMaxBootPrecompileRows = 1200`, `invalidate_dl_memory_range()`, caché nativa a `65536` entradas): `271/271` escenas sin cierres ni errores de shaders (`263/271` a `>= 30 FPS`).
+- **Estabilidad de memoria RAM (Soak Tests)** (`extern/aurora`: promoción multiframe `NativeGeomSeenInfo`, `rehash(0)`, `prune_unreferenced_textures()`, carga bajo demanda desde SQLite con `g_knownKeys` y `{}.swap(g_map)`): `VmRSS` estabilizado tras 240 s en `las_29` (`583.7 -> 585.2 MB`) y `yuu_03` (`599.3 MB`), y acotado entre `634.9–637.9 MB` en bucle multi-escena de ~315 s.
+- **Primitivas de líneas/puntos y efectos N64**: soporte de `GX_LINES`, `GX_LINESTRIP`, `GX_POINTS`, `GL_ALIASED_LINE_WIDTH_RANGE`, `glLineWidth`, `gl_PointSize` y corrección XF en Aurora (`lib/gl/*`, `lib/gx/*`, `GXAurora.cpp`), además de `effSetVtxDescN64Sized` en los 13 módulos de `src/effect/n64/`.
+- **Objetivo 30 FPS efectivo y sincronización a 60 Hz de batalla/menús/AC/efectos**:
+  - Eliminada la comprobación residual `e->cameraId == CAMERA_OFFSCREEN2` en `portDispMustDraw()` (`src/driver/dispdrv.c`) y añadido `portDispForceDrawThisFrame()` en capturas *one-shot* (`sac_deka.c`, `sac_scissor.c`, `sac_zubastar.c`, `unit_party_chuchurina.c`, `battle_stage.c`, `evt_mobj.c`, `win_root.c`, `win_log.c`).
+  - Movida la actualización de estado a 60 Hz desde `disp` a `main` en `battle_menu_disp.c`, `battle_ac.h`/`.c` y 19 archivos de `src/battle/ac/`, `sac_scissor.c`, `sac_bakugame.c`, `statuswindow.c`, `eff_sstar_n64.c`, `eff_packn_bfire_n64.c` y `eff_kemuri8_n64.c`, verificado visualmente por lotes en modo `[battery] 30fps on`.
+- **Corrección del holograma de Peach en `aji_17` (Cap. 2)**: en `rels/aji/src/aji_17.c` (`peach_capture` y `disp_horogram`), captura de silueta alfa en `buf0` con `GXSetAlphaUpdate(GX_TRUE)` durante `animPoseDrawMtx` pases `1..2` y recorte TEV de 1 etapa (`TEXA * RASA`) omitiendo la copia de profundidad `GX_TF_Z8` ignorada por Aurora; verificado visualmente y con smoke test final en RK3326.
+- **Contribuidores**: `Jbcgames` (autor y mantenedor del fork) y `Antigravity` (Google DeepMind AI Coding Assistant).
+
 ---
 
 ## Instalación en PortMaster (desde el paquete Release)
 
-1. Descarga `papercut-0.4.5-rk3326-portmaster.zip` desde la sección **Releases** de este repositorio.
+1. Descarga `papercut-0.5.0-rk3326-portmaster.zip` desde la sección **Releases** de este repositorio.
 2. Descomprime su contenido en la carpeta de puertos de tu consola (`/roms/ports/`), de modo que queden:
    - `/roms/ports/Paper Cut.sh`
    - `/roms/ports/papercut/PaperCut.sh`, `ttyd-eu`, `papercut.gptk`, `libs.aarch64/`, `Logo*.jpg`, `saves/settings.txt`
@@ -160,6 +171,7 @@ cmake -S . -B build-aarch64 -G Ninja \
   -DTTYD_VERSION=G8MP01 \
   -DTTYD_BACKEND=aurora \
   -DTTYD_AURORA_GLES=ON \
-  -DTTYD_NO_DISC_ASSETS=ON
+  -DTTYD_NO_DISC_ASSETS=ON \
+  -DTTYD_PORT_VERSION=0.5.0-rk3326
 ninja -C build-aarch64 ttyd-eu
 ```

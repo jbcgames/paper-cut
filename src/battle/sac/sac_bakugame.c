@@ -1186,6 +1186,14 @@ main_end:
     if (w->poseId != -1) {
         animPoseMain(w->poseId);
     }
+#ifdef TARGET_PC
+    if (w->gauge >= 100.0f) {
+        BattleACDispParams* disp = &_battleWorkPointer->actionCommands.disp;
+        disp->color.r = 0;
+        disp->color.a = 0xFF;
+        BattleAcStepColorPulse(disp);
+    }
+#endif
     dispEntry(CAMERA_2D, 900.0f, 1, bakuGameDisp2D, NULL);
     dispEntry(CAMERA_3D, 0.0f, 1, bakuGameDisp3D, NULL);
     return 0;
@@ -1458,8 +1466,9 @@ static void bakuGameDisp2D(CameraId cam, void* param) {
     }
     full = 0;
     if (w->gauge >= 100.0f) {
-        disp->color.r = 0;
         full = 1;
+#ifndef TARGET_PC
+        disp->color.r = 0;
         disp->color.a = 0xFF;
         disp->color.g += disp->colorStep[1];
         disp->color.b += disp->colorStep[2];
@@ -1469,6 +1478,7 @@ static void bakuGameDisp2D(CameraId cam, void* param) {
         if (disp->color.g >= 0xF5 && disp->colorStep[1] >= 0) {
             disp->colorStep[1] = disp->colorStep[2] = -0x10;
         }
+#endif
     }
     BattleAcDrawGauge(w->dc, w->e0, 0xB1, w->rate, 3, 0x21, 0x42, 0x64, full);
 }

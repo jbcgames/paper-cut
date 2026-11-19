@@ -427,12 +427,9 @@ u32 effTblRandN64(u32 rand, s32 index) {
  * color and texcoord attributes for the following draws.
  */
 #ifdef TTYD_BACKEND_AURORA
-/* 128 vertices: the largest N64 effect array is eff_cloud_n64's 105 (0x690 bytes); the others are 4-80.
- * Each draw uploads this much per attribute: at 64 KiB the hundreds of draws of the voices before the
- * Shadow Queen's second phase (las_29) still ran Aurora's frame storage out (abort in recording.cpp). */
-#define EFF_N64_ARRAY_WINDOW (128u * sizeof(effN64Vtx))
+#define EFF_N64_DEFAULT_VTX_COUNT 128u
 #endif
-void effSetVtxDescN64(effN64Vtx* vtx) {
+void effSetVtxDescN64Sized(effN64Vtx* vtx, u32 count) {
     GXClearVtxDesc();
     GXSetVtxDesc(GX_VA_POS, GX_INDEX16);
     GXSetVtxDesc(GX_VA_CLR0, GX_INDEX16);
@@ -441,20 +438,28 @@ void effSetVtxDescN64(effN64Vtx* vtx) {
     GXSetVtxAttrFmt(GX_VTXFMT0, GX_VA_CLR0, GX_CLR_RGBA, GX_RGBA8, 0);
     GXSetVtxAttrFmt(GX_VTXFMT0, GX_VA_TEX0, GX_TEX_ST, GX_S16, 5);
 #ifdef TTYD_BACKEND_AURORA
-    /* PC port: these arrays are small (a table in the executable, or an effect's
-     * work in the effect heap), but a pointer gives Aurora no size, and one in
-     * game memory got 65536 vertices' worth (917 KB) copied per attribute, each
-     * time an effect draws: a Shooting Star's dozens of stars ran Aurora's
-     * frame storage out (abort in recording.cpp's push). The executable's
-     * tables already get a 64 KiB window (aurora_compat.h): the same for all,
-     * far more than any N64 effect indexes. */
-    portGXSetArraySized(GX_VA_POS, &vtx->x, sizeof(effN64Vtx), EFF_N64_ARRAY_WINDOW);
-    portGXSetArraySized(GX_VA_CLR0, &vtx->r, sizeof(effN64Vtx), EFF_N64_ARRAY_WINDOW);
-    portGXSetArraySized(GX_VA_TEX0, &vtx->s, sizeof(effN64Vtx), EFF_N64_ARRAY_WINDOW);
+    /* PC port: pass exact vertex count so arrays larger than 128 vertices (e.g.
+     * eff_thunder_n64's 552) are not truncated and smaller dynamic buffers do not
+     * hash trailing unrelated heap bytes. */
+    {
+        const u32 arrayBytes = count * (u32)sizeof(effN64Vtx);
+        portGXSetArraySized(GX_VA_POS, &vtx->x, sizeof(effN64Vtx), arrayBytes);
+        portGXSetArraySized(GX_VA_CLR0, &vtx->r, sizeof(effN64Vtx), arrayBytes);
+        portGXSetArraySized(GX_VA_TEX0, &vtx->s, sizeof(effN64Vtx), arrayBytes);
+    }
 #else
+    (void)count;
     GXSetArray(GX_VA_POS, &vtx->x, sizeof(effN64Vtx));
     GXSetArray(GX_VA_CLR0, &vtx->r, sizeof(effN64Vtx));
     GXSetArray(GX_VA_TEX0, &vtx->s, sizeof(effN64Vtx));
+#endif
+}
+
+void effSetVtxDescN64(effN64Vtx* vtx) {
+#ifdef TTYD_BACKEND_AURORA
+    effSetVtxDescN64Sized(vtx, EFF_N64_DEFAULT_VTX_COUNT);
+#else
+    effSetVtxDescN64Sized(vtx, 0u);
 #endif
 }
 

@@ -59,6 +59,10 @@ s32 battleAcMain_PowerGaugeLv2(BattleWork* work) {
     if (ac->acUnit->badgesEquipped.AutoCommand) {
         flag = 1;
     }
+#ifdef TARGET_PC
+    {
+        const s32 prevState = ac->acState;
+#endif
     switch (ac->acState) {
         case 0:
             memset(disp, 0, 0x2C);
@@ -198,6 +202,29 @@ s32 battleAcMain_PowerGaugeLv2(BattleWork* work) {
             ac->deletecb = NULL;
             return 0;
     }
+#ifdef TARGET_PC
+    if (prevState != 0) {
+        switch (ac->acState) {
+            case 99:
+            case 100:
+            case 1000:
+            case 1002:
+                BattleAcStepSlideIn(disp, -300.0f, 30.0f);
+                if (AC_WORK(ac)->full) {
+                    BattleAcStepColorPulse(disp);
+                }
+                break;
+            case 1003:
+            case 1004:
+                BattleAcStepSlideOut(disp, 30.0f, -300.0f);
+                if (AC_WORK(ac)->full) {
+                    BattleAcStepColorPulse(disp);
+                }
+                break;
+        }
+    }
+    }
+#endif
     return 1;
 }
 
@@ -216,26 +243,34 @@ void battleAcDisp_PowerGaugeLv2(CameraId cameraId, void* param) {
     BattleACDispParams* disp = AC_DISP(ac);
     switch (ac->acState) {
         case 99:
+#ifndef TARGET_PC
             disp->iconX = intplGetValue(4, -300.0f, 30.0f, 20 - disp->slideTimer, 20);
+#endif
         case 100:
         case 1000:
         case 1002:
             actionCommandDisp(disp->iconX, disp->iconY);
+#ifndef TARGET_PC
             if (disp->slideTimer > 0) {
                 disp->slideTimer--;
             }
+#endif
             break;
         case 1003:
         case 1004:
+#ifndef TARGET_PC
             if (disp->slideTimer >= 40) {
                 disp->iconX = intplGetValue(4, 30.0f, -300.0f, disp->slideTimer - 40, 20);
             } else {
                 disp->iconX = 30.0f;
             }
+#endif
             actionCommandDisp(disp->iconX, disp->iconY);
+#ifndef TARGET_PC
             if (disp->slideTimer < 60) {
                 disp->slideTimer++;
             }
+#endif
             break;
     }
 }
@@ -280,16 +315,18 @@ static void actionCommandDisp(f32 x, f32 y) {
     }
     ac->disp.gaugeRatio = ratio;
     if (AC_WORK(ac)->full) {
+#ifndef TARGET_PC
         ac->disp.color.g += ac->disp.colorStep[1];
         ac->disp.color.b += ac->disp.colorStep[2];
-        if (ac->disp.gaugeRatio >= 1.0f) {
-            full |= 1;
-        }
         if (ac->disp.color.g <= 0x80 && ac->disp.colorStep[1] < 0) {
             ac->disp.colorStep[1] = ac->disp.colorStep[2] = 0x10;
         }
         if (ac->disp.color.g >= 0xF5 && ac->disp.colorStep[1] > 0) {
             ac->disp.colorStep[1] = ac->disp.colorStep[2] = -0x10;
+        }
+#endif
+        if (ac->disp.gaugeRatio >= 1.0f) {
+            full |= 1;
         }
     }
     cnt = 0;

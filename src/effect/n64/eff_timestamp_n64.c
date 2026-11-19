@@ -246,7 +246,7 @@ static void effTimestampDisp(CameraId cameraId, EffectEntry* effect) {
     DCFlushRange(vtx, sizeof(effN64Vtx) * 32);
     GXInvalidateVtxCache();
     GXSetCullMode(GX_CULL_NONE);
-    effSetVtxDescN64(vtx);
+    effSetVtxDescN64Sized(vtx, 32u);
     for (i = 0; i < 10; i++) {
         PSMTXTrans(trans, work->posX[i], work->posY[i], work->posZ[i]);
         PSMTXScale(scale, 0.01f * (f32)scale_data[i % 4], 0.01f * (f32)scale_data[i % 4], 0.01f * (f32)scale_data[i % 4]);

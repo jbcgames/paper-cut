@@ -1,145 +1,146 @@
-# Paper Cut — Fork RK3326 / PortMaster (`jbcgames`)
+# Paper Cut — Fork RK3326 / PortMaster (`v0.5.0-rk3326`)
 
-Adaptación y optimización de [LLCOOLT/paper-cut](https://github.com/LLCOOLT/paper-cut) (basado en la descompilación del port nativo y su backend OpenGL ES 3.0 en [Aurora](https://github.com/jbcgames/aurora)) para consolas portátiles **RK3326** con GPU **Mali-G31 MP2** bajo **KMSDRM / PortMaster** (objetivo verificado: `dArkOS4Clone` / G350 / K36, versión europea `G8MP01`).
+Adaptación y optimización de [LLCOOLT/paper-cut](https://github.com/LLCOOLT/paper-cut) (descompilación y port nativo de *Paper Mario: The Thousand-Year Door*) junto con el backend OpenGL ES 3.0 del submódulo [jbcgames/aurora](https://github.com/jbcgames/aurora) (rama `rk3326-gles`, basado en [encounter/aurora](https://github.com/encounter/aurora)) para consolas portátiles **RK3326** con GPU **Mali-G31 MP2** bajo **KMSDRM / PortMaster** (verificado en `dArkOS4Clone` / G350 / K36 con la versión europea `G8MP01`).
 
-> **Aviso legal:** Ni este repositorio ni los archivos de *Release* contienen el juego original, imágenes de disco (`game.iso`), archivos extraídos del disco (`orig/`) ni contenido protegido por derechos de autor. Debes aportar tu propia copia legal europea (`G8MP01`) en `papercut/game.iso`.
-
----
-
-## Progreso realizado y mejoras implementadas
-
-### 1. Estabilidad gráfica en OpenGL ES 3.0 / Mali-G31 (`extern/aurora` + `paper-cut`)
-- **Conversión 3D → 2D → 3D del barco (`gor_00` / `ship_pera`)**: corrección de cálculo de *bounding box* y cacheo de copias de framebuffer (`invalidate_copy_caches` en `GXFrameBuffer.cpp` + `command_processor.cpp`), evitando texturas corruptas al girar el barco antes del prólogo.
-- **Texturas de personajes (`gor_00` / `christine_osoware`)**: corrección de decodificación TLUT/paletas en `command_processor.cpp`, `regs.cpp` y `gx.cpp`, eliminando paletas rotas en NPCs y escenas con Goombella/Crump.
-- **Barras de estado y HUD**: corregida la geometría/renderizado de indicadores en batalla y mundo.
-- **Flujo de inicio directo y sin menús extra**: eliminados los menús agregados sobre la pantalla de título (`title_menu`, `notes`, `whats_new`, pistas), pasando de `Press Start` (`SEQ_TITLE`) directamente a la selección de archivo (`SEQ_LOAD`) y evitando el sobrecoste visual y de CPU de la interfaz superpuesta.
-
-### 2. Optimizaciones de rendimiento para RK3326 (Cortex-A35 + Mali-G31)
-1. **Caché persistente de geometría nativa (`GL_EXT_buffer_storage`)**:
-   - `g_nativeVertexCacheBuffer` y `g_nativeIndexCacheBuffer` pasan a mapeo persistente coherente con copia directa en hilo principal + sincronización segura en `begin_frame`, eliminando los bloqueos completos de GPU (`glBufferSubData` stalls de `145–248 ms`) durante promociones de geometría.
-2. **Memoización de pipelines GX (`s_nativePipeMemo`)**:
-   - Reducción del coste de búsqueda/resolución de pipelines en `command_processor.cpp` (`pipe_ref`: `1.5–1.8 ms` → `~0.1 ms`).
-3. **`glDrawElementsBaseVertex` en Aurora GL (`gl/gl_core.hpp`, `gl/gl_loader.cpp`, `gl/pass.cpp`)**:
-   - Resolución dinámica (`core` / `EXT` / `OES`) soportada por `libmali-bifrost-g31-rxp0-gbm.so`.
-   - Aislamiento de `GxVaoLayout::vao` respecto a `fallbackVao` y alineación de vértices nativos al `nativeStride` (`align_up_any`), evitando reconfigurar `glVertexAttribPointer` en cada draw indexado.
-4. **Compactación y deduplicación de Uniform Buffers + Caché XF (`gx/gx.hpp`, `gx/shader.cpp`, `gx/shader_info.cpp`)**:
-   - Acotación dinámica de `postex_mtx` (`1` u `11` en lugar de `20`), `nrm_mtx` (`1` en draws con una matriz) y `texcoord_scale` solo cuando el shader muestrea UVs.
-   - Caché de deduplicación por frame `s_uniformDedup` (1024 entradas con hash XXH3 + `memcmp` vía `uniform_data_at`) reutilizando rangos UBO repetidos.
-   - Ampliación de `xfRegCache`/`xfRegValid` hasta `0x60` (escalares `0x3F..0x5F`, viewport `0x1A..0x1F` y proyección `0x20..0x26`, invalidando al escribir BP `0x00`).
-
-### 3. Integración PortMaster, idioma y splash de carga (`port/portmaster/`)
-- **Idioma español por defecto**: `language=4` configurado en `papercut/saves/settings.txt` (verificado en título, selector de archivos, diálogos y menú de batalla).
-- **Splash de carga adaptado a resolución (`Logo*.jpg` + `sdl2imgshow`)**:
-  - Selección automática según resolución/relación de aspecto usando logotipos propios `jbcgames ports` (sin arte protegido por derechos de autor).
-  - Inicialización anticipada de `MALI_DIR` (`/tmp/papercut_mali` apuntando a `libmali-bifrost-g31-rxp0-gbm.so`) **antes** de lanzar `sdl2imgshow`, pasando `LD_LIBRARY_PATH="$MALI_DIR..."` para evitar fallos de carga EGL (`libEGL.so.1.1.0`) en sistemas `dArkOS4Clone`.
-  - Preservación automática del volumen de EmulationStation (`ES_VOL`) mediante `amixer` y `oom_score_adj=-500`.
+> **Aviso legal:** Ni este repositorio ni los paquetes de *Release* contienen el juego original, imágenes de disco (`game.iso`), archivos extraídos del disco (`orig/`) ni contenido protegido por derechos de autor. El binario `ttyd-eu` se compila con `-DTTYD_NO_DISC_ASSETS=ON` (usando los *placeholders* de `port/include/no_disc_assets/`). Debes aportar tu propia copia legal europea (`G8MP01`) en `/roms/ports/papercut/game.iso`.
 
 ---
 
-## Resultados medidos en hardware real (RK3326 @ Mali-G31 MP2)
+## Estado actual y cambios implementados (hasta `v0.5.0-rk3326`)
 
-| Métrica / Escena | Baseline previo | Tras optimizaciones |
-|---|---:|---:|
-| Worker GL en `gor_00` (`ren` / `work`) | `25.5–26.4 ms/f` | **`12.71–13.86 ms/f`** |
-| Subida de Uniforms por frame (`gor_00`) | `476.3 KB/f` | **`131.1–133.7 KB/f`** (~72% menos) |
-| CPU GX drain (`[DRAIN-TIMING-30f] gor_00`) | `19.2–20.2 ms` | **`16.0–17.3 ms`** |
-| Combate (`hei_00`) | `22.6–25.0 ms` (`drain`) + stalls | **`13.97–18.01 ms`** (`ren`) / **`18.7–19.5 ms`** (`drain`) |
-| Caché de binarios GLSL al arranque | — | `156` binarios cargados, `0 source compiles` en `1322 ms` |
+### 1. Modo unificado a 30 FPS renderizados con lógica bloqueada a 60.00 Hz
+- **Objetivo global de `30 FPS` en resolución nativa `640×480`** (`port/src/aurora/battery_aurora.c`, `port/src/aurora/vi_aurora.c`, `port/settings/features/toggles.cpp`):
+  - `battery_saver = 2` (*Always*) activo por defecto (`[battery] 30fps on`), manteniendo `marioStMain()` y los controles a `60 Hz` reales mientras `portBatterySkipDraw()` alterna el renderizado (`(sSinceDrawn < 2) || portViBehindSchedule()`).
+  - Eliminada la comprobación residual `e->cameraId == CAMERA_OFFSCREEN2` en `portDispMustDraw()` (`src/driver/dispdrv.c`) que obligaba a dibujar cada frame, dejando `portDispForceDrawThisFrame()` únicamente en las capturas *one-shot* necesarias (`sac_deka.c`, `sac_scissor.c`, `sac_zubastar.c`, `unit_party_chuchurina.c`, `battle_stage.c`, `evt_mobj.c`, `win_root.c`, `win_log.c`).
+- **Sincronización a 60 Hz de menús, *Action Commands*, Poderes Estelares y efectos**:
+  - Se desacopló el avance de estado respecto a los callbacks de render (`disp` → `main` bajo `#ifndef TARGET_PC` / `#ifdef TARGET_PC`) para que ninguna animación o barra avance a mitad de velocidad al saltar frames:
+    - Menús de combate (`src/battle/battle_menu_disp.c`): `stepMainMenuState()`, `stepSubMenuState()` (`sSubMenuSkipFirstStep`) y `stepMenuPartyChangeButton()`.
+    - *Action Commands* (`include/battle/battle_ac.h`, `src/battle/battle_ac.c` y 19 módulos en `src/battle/ac/`): helpers `BattleAcStepSlideIn`, `BattleAcStepSlideOut`, `BattleAcStepGaugeEase` y `BattleAcStepColorPulse`, corrigiendo el ritmo de aparición de barras y la alineación de indicadores (como los ataques de Koops).
+    - Poderes Estelares, HUD y efectos N64 (`sac_scissor.c`, `sac_bakugame.c`, `statuswindow.c`, `eff_sstar_n64.c`, `eff_packn_bfire_n64.c`, `eff_kemuri8_n64.c`).
 
----
+### 2. Correcciones gráficas y de estabilidad en OpenGL ES 3.0 / Mali-G31
+- **Holograma de Peach en sala de Pajarón (`rels/aji/src/aji_17.c`, Cap. 2)**:
+  - Aurora omite copias de profundidad EFB (`GX_TF_Z8`, `kEnableDepthCopies = false`), provocando un recuadro negro translúcido alrededor del holograma.
+  - Bajo `#ifdef TARGET_PC`, `peach_capture()` habilita `GXSetAlphaUpdate(GX_TRUE)` en los pases `1..2` de `animPoseDrawMtx` y captura la silueta con alfa en `horogram_wp->buf0` (`GX_TF_RGBA8`), mientras `disp_horogram()` usa 1 etapa TEV (`TEXA * RASA`) para recortar al personaje limpiamente.
+- **Primitivas de líneas/puntos y efectos N64 (`extern/aurora` + `src/effect/n64/`)**:
+  - Soporte en GLES 3.0 / GX para `GX_LINES`, `GX_LINESTRIP` y `GX_POINTS`, consulta de `GL_ALIASED_LINE_WIDTH_RANGE`, `glLineWidth`, `gl_PointSize` y sincronización de registros XF (`xfData + (i + k) * 4` e invalidación `xfRegValid`), corrigiendo el trazado de *Ataque Estelar* (*Art Attack*) y *Torm. Estelar* (*Supernova*).
+  - Incorporado `effSetVtxDescN64Sized` (`sizeof(effN64Vtx) == 14`) en los 13 módulos de `src/effect/n64/`.
+- **Correcciones acumuladas desde `v0.4.1-rk3326` – `v0.4.5-rk3326`**:
+  - Interludio de Peach al final del Acto 1 en `aji_10` (`portDispGroupMapObjects()` en `src/driver/dispdrv.c`).
+  - Fondo negro de respaldo cuando falta `.tpl` en lugar de verde neón (`src/driver/bgdrv.c`: `sys_00`, `muj_10`, `muj_20`).
+  - Solución a `unknown opcode 0x6A` al cargar partidas (`animdrv.c` + invalidación `lastVtxFmt` en Aurora).
+  - Solución a glifos omitidos en UI y `SIGSEGV` en `disp_maku` (`flush_pending_pnmtx_batch` con buffers aislados `s_mergedVtxBuf`/`s_mergedIdxBuf` y revalidación tras rehash).
+  - Corrección de vibración de pies al caminar (`src/driver/npcdrv.c` con cálculo exacto de `spd` e histéresis de estado).
+  - Corrección 3D→2D→3D del barco (`gor_00` / `ship_pera`), decodificación TLUT/paletas, guardas nulas en `dvdmgr.c`/`battle.c`/`seq_battle.c`, simplificación del menú de pausa (`win_root.c`), flujo directo sin menús extra en título y salto de logos iniciales con botón (`seq_logo.c`, `dmo_00.c`).
 
-## Actualización `v0.4.2-rk3326`: Objetivo global 30 FPS (lógica 60 Hz), corrección de animación de caminado y optimizaciones GX/GL
-
-### 1. Mejoras implementadas en `v0.4.2-rk3326`
-
-#### A. Límite global a 30 FPS con lógica bloqueada a 60.00 Hz (`paper-cut`)
-- **Unificación a 30 FPS en todo el juego (`port/settings/features/toggles.cpp`, `port/src/aurora/battery_aurora.c`, `port/src/aurora/vi_aurora.c`)**:
-  - `battery_saver` activo por defecto (`2` = `"Always"`), con override opcional por variables `TTYD_MIXED_FPS` / `TTYD_NO_MIXED_FPS`.
-  - `portBatteryFramerate()` mantiene `"60"` Hz de simulación lógica (`marioStMain()`) en todo momento y `portBatteryResolution()` conserva la resolución nativa (`640×480` sin reducir a 0.5x).
-  - `portBatterySkipDraw()` limita el renderizado de todas las secuencias (campo, combate, menús y escenas) a un objetivo uniforme de `30 FPS` (`(sSinceDrawn < 2) || portViBehindSchedule()`), manteniendo la velocidad real de juego y controles a `60 Hz`.
-  - Protección de capturas offscreen (`src/driver/dispdrv.c`, `src/driver/imgdrv.c`): `portDispMustDraw()` y `portImgHasPendingCapture()` impiden saltar el dibujado cuando existen capturas *one-shot* pendientes en `CAMERA_OFFSCREEN`.
-
-#### B. Corrección del bug visual de vibración de pies al caminar (`src/driver/npcdrv.c`)
-- **Causa raíz**: en `npcMain()`, el desplazamiento `dv = entry->position - entry->prevPosition` aplicado por `evtmgrMain()` con el `entry->moveDt` del tick previo se dividía entre el nuevo `entry->moveDt` (o con un tope artificial de `0.020f`), provocando oscilaciones de velocidad aparente `spd` cuando bajaban los FPS o durante ticks de recuperación (*catch-up*). Esto hacía alternar repetidamente entre `stayAnim` (pies juntos, frame 0) y `walkAnimation`/`runAnimation` (reiniciando el ciclo en frame 0).
-- **Solución**:
-  - Cálculo exacto de `spd` usando `spdDt = (prevMoveDt > 0.0f) ? prevMoveDt : entry->moveDt` sin el tope `0.020f` y protegiendo ticks con `prevMoveDt <= 0.0f && dv == 0`.
-  - Histéresis por ranura separada para mundo y batalla (`sAnimDebounce[2][256]` y `sAnimDebStart[2][256]`): entrar en movimiento desde reposo cambia de inmediato (`1` tick), mientras que volver a `stayAnim` o alternar entre caminar/correr exige al menos `4` ticks consecutivos **y** `>= 80 ms` de `gp->renderTime`, preservando la fase del paso entre caminar y correr (`entry->moveAnimState <= 1`).
-
-#### C. Optimizaciones GX/GL (Lotes 1 y 2 en `paper-cut` + `extern/aurora`)
-- **Animación y mapas (`src/driver/animdrv.c`, `port/src/aurora/gx_compat_aurora.c`, `src/driver/mapdrv.c`, `include/driver/mapdrv.h`, `src/driver/dispdrv.c`)**:
-  - Deduplicación de punteros de textura entre sub-draws en `renderProc` (`prevTexPtr` / `prevTexValid`) y envío de arreglos con tamaño explícito (`ANIM_SET_ARRAY_SIZED` -> `portGXSetArrayExplicit` / `portGXSetArraySized`).
-  - Caché de luces en vista `sMapLightObjCache` (64 entradas, `mapPrepareLightObj`), caché de matrices de textura de materiales `sMapMatTexCache` (512 entradas), `mapSetMaterialLightNoFog` y agrupación segura de objetos opacos de mapa en `dispdrv.c`.
-- **Emisión rápida de vértices y sincronización EGL (`include/dolphin/gx/GXVert.h`, `lib/dolphin/gx/GXVert.cpp`, `lib/webgpu/sdl2shim_present.cpp`, `lib/gfx/pipeline_cache.cpp`)**:
-  - Rutinas especializadas `GXEmitAnimTriFan16_1Tex` y `GXEmitAnimTriFan16_NTex`.
-  - Espera GPU en servidor mediante `eglWaitSyncKHR` (con fallback `eglClientWaitSyncKHR`), creación de `eglCreateSyncKHR` antes de `glFlush` y caché thread-local `FastPipelineEntry` (512 ranuras) con `g_pipelineCacheGeneration` atómico.
-- **Caché shadow GX en C y fast paths en RenderWorker (`lib/dolphin/gx/__gx.h`, `GX*.cpp`, `lib/gl/*`, `lib/gx/*`)**:
-  - `__GXShadowCache __gxShadow` protegido por `!aurora::gx::fifo::in_display_list()` y `epoch`.
-  - `BakedState::operator==`, máscaras activas de texturas (`BindingSet::activeTexMask` / `useActiveTexMask` y `Shadow::nonEmptyTexMask`), `PassEncoder::m_id` monotónico, `s_fastBindCache` y `s_resolvedDrawBindCache` (512 ranuras).
-  - Descartado y eliminado `coalesce_static_dl_draws` tras confirmar que corrompía texturas/geometría en batalla al fusionar display lists con cambios de estado intermedios.
-- **Corrección de glifos omitidos en UI (`"Tiempo"`) y cierre `SIGSEGV` al iniciar partida desde el menú de archivos (`lib/gx/command_processor.cpp`)**:
-  - **Buffers de fusión dedicados (`s_mergedVtxBuf`, `s_mergedIdxBuf`) en `flush_pending_pnmtx_batch()`**: cuando `submit_native_gx_draw` recibía el 11.º glifo consecutivo con matriz trasladada (p. ej. la `'e'` de `"Tiempo 00:04"` / `"Tiempo 00:06"` tras llenar los `MaxPnMtx = 10` slots con `"Nivel 1"` + `"Ti"`), el vaciado automático del lote anterior en `flush_pending_pnmtx_batch()` limpiaba y sobrescribía `s_nativeVtxBuf` y `s_nativeIdxBuf` mientras `vtxPtr` e `idxPtr` seguían apuntando a esos mismos buffers para el 11.º glifo. Separar `s_mergedVtxBuf` y `s_mergedIdxBuf` preserva intactos todos los caracteres.
-  - **Revalidación de `cachedEntry` tras rehash de `s_nativeGeomCache` en `flush_pending_pnmtx_batch()`**: cuando `flush_pending_pnmtx_batch()` promovía un lote fusionado a `s_nativeGeomCache`, `s_nativeGeomCache.emplace(...)` podía rehashear el `absl::flat_hash_map` e invalidar el puntero local `cachedEntry` de `submit_native_gx_draw`, que luego se guardaba en `record_pnmtx_item` con el nuevo `s_nativeGeomPtrEpoch` post-rehash, provocando un `SIGSEGV` en `memcpy` durante el cierre del telón (`disp_maku`) al iniciar partida. Ahora se registra `cachedEntryEpoch` al obtener `cachedEntry` y se re-consulta `s_nativeGeomCache.find(key)` si la época cambió tras `flush_pending_pnmtx_batch()`.
+### 3. Optimizaciones de rendimiento y gestión de RAM (~895 MiB)
+- **Aurora GL/GX (`extern/aurora`)**:
+  - Caché persistente de geometría (`GL_EXT_buffer_storage`), promoción multiframe (`NativeGeomSeenInfo`, `minRecurFrames`) para no saturar con geometría efímera de un frame, `kMaxNativeGeomCacheEntries = 65536` con auto-reset acotado, `StaticDlEntry::drawCount` en `u16` y `rehash(0)`.
+  - Invalidación de display lists acotada por rango (`invalidate_dl_memory_range`) y poda de texturas no referenciadas (`prune_unreferenced_textures()`).
+  - Caché de programas binarios SQLite con tope de precompilación al arranque (`kMaxBootPrecompileRows = 1200`), carga de blobs bajo demanda mediante `g_knownKeys` y liberación en RAM tras el arranque (`{}.swap(g_map)`).
+  - `glDrawElementsBaseVertex`, memoización de pipelines (`s_nativePipeMemo`), caché shadow GX/XF, compactación y deduplicación UBO (`s_uniformDedup`) y sincronización GPU mediante `eglWaitSyncKHR`.
+- **Motor y escenas (`paper-cut`)**:
+  - `smartPreDispSync()` antes de `camDraw()` (`memory.c` / `mariost.c`) para evitar vaciados síncronos en mitad de escena, e invalidación selectiva en `portGXForgetRange()` (`gx_arrays_pc.c`).
+  - Culling homogéneo de 6 planos (`mapClipBoxVisible`, `extPointInFrustum`, `effFireMain`), loteo por textura en multitudes (`extDraw`, `ryushi_disp` en `yuu_03`), omisión de Punis inactivos (`mri_puni.c`), captura única en ventanas del Excess Express (`rsh.c`) y optimizaciones en `hom_00.c` / `envdrv.c`.
 
 ---
 
-### 2. Verificación multimapa, menú de archivos y combate en RK3326 (`v0.4.2-rk3326`)
+## Pruebas realizadas en hardware real (RK3326 / Mali-G31 MP2)
 
-Binario Release final limpio (sin hooks de perfilado temporal): `build-aarch64/ttyd-eu.stripped` (`46M`, `SHA256: 073d6aea8fb51b0d2f8629727fc75f6a32df66cb8be7ef44ff9d9a1aed1545b7`), desplegado y verificado en `/roms/ports/papercut/ttyd-eu`.
+| Tipo de prueba | Alcance y condiciones | Resultado verificado |
+|---|---|---|
+| **Barrido completo de escenarios con movimiento** | `271 / 271` escenas jugables de `G8MP01` con desplazamiento continuo y evasión de enemigos (`TTYD_SWEEP_MOVE=1`, Pass 2 en modo 60 Hz sin límite de 30 FPS) | `0` crasheos, `0` timeouts, `0` errores de shader, `21` hojas de contacto limpias; **`263 / 271` escenas `>= 30 FPS`** (`166` `>= 50 FPS`, `97` `30.0–49.9 FPS`, `1` `28.0–29.9 FPS`, `3` `25.0–27.9 FPS`, `4` en `yuu_00..03` a `18.81–22.86 FPS` durante arranque / `24.91–28.43 FPS` en medición estable). |
+| **Estabilidad y fugas de memoria RAM (Soak Tests)** | Ejecución prolongada (`TTYD_SWEEP_MOVE=1`, compilación Release) en `las_29` (~240 s), `yuu_03` (~240 s) y bucle multi-escena `gor_01 → yuu_03 → las_29 → win_06` ×3 (~315 s) | `EXIT_CODE=0` en todos los casos. `VmRSS` estabilizado (`las_29`: `583.7 → 585.2 MB`; `yuu_03`: `599.3 MB` sin crecimiento en 165–240 s; bucle multi-escena: `634.9–637.9 MB` con poda activa de `geom-cache`). |
+| **Auditoría visual de combate a 30 FPS** | Pruebas por lotes en `[battery] 30fps on` en Dojo de Batalla con inspección directa de capturas | Rueda y submenús fluidos a 60 Hz lógicos; 9 Saltos y 9 Martillos de Mario, 8 Poderes Estelares, técnicas de los 7 compañeros (*Goombella*, *Koops*, *Bobbery*, *Yoshi*, *Claudia*, *Bibiana*, *EMOV/Lupina*), ítems ofensivos y *Guard*/*Superguard* verificados. |
+| **Escena `aji_17` (Holograma de Peach)** | Capturas en diálogo y baile + smoke test final en el binario Release desplegado (`[battery] 30fps on`, `TTYD_STORY=113`) | Holograma recortado con transparencia limpia sin recuadro negro; arranque y entrada a `aji_17` con `SMOKE_RC=0`, `[warp] to aji_17` y `0` errores/`FATAL`. |
 
-| Ubicación / Escena | Mapa (`story`) | Estado / Salida | Intervalo medio (`mean_iv`) | Mediana (`p50_iv`) | FPS medio | `mean_work` | Verificación visual |
-|---|---|---|---:|---:|---:|---:|---|
-| **Combate (Prólogo / Goombas)** | `hei_00` (batalla) | `EXIT=0`, `0 errs` | `33.34 ms` (`35.68 ms` con captura) | `32.69–33.34 ms` | **`28.03–29.99 FPS`** | `14.49–16.12 ms` | 100% limpia (`bat_vis_1..3.png`, `final_bat.png`) |
-| **Puerto de Rogueport** | `gor_00` (`20`) | `EXIT=0`, `0 errs` | `33.84 ms` | `33.33 ms` | **`29.55 FPS`** | `14.02 ms` | 100% limpia (`map_gor_00.png`) |
-| **Villa Petal (Capítulo 1)** | `nok_00` (`50`) | `EXIT=0`, `0 errs` | `33.54 ms` | `33.27 ms` | **`29.81 FPS`** | `18.22 ms` | 100% limpia (`map_nok_00.png`) |
-| **Villa Sombría (Capítulo 4)** | `usu_00` (`200`) | `EXIT=0`, `0 errs` | `34.27 ms` | `32.44 ms` | **`29.18 FPS`** | `23.07 ms` | 100% limpia (`map_usu_00.png`) |
-| **Vestíbulo Glitz Pit (40+ NPCs)** | `tou_02` (`170`) | `EXIT=0`, `0 errs` | `34.97 ms` | `33.22 ms` | **`28.59 FPS`** | `19.26 ms` | 100% limpia (`final_tou_02.png`) |
-| **Plaza de Ciudad Glitz (Cap. 3)** | `tou_01` (`170`) | `EXIT=0`, `0 errs` | `35.13 ms` | `34.29 ms` | **`28.46 FPS`** | `24.74 ms` | Sin fallos ni cierres |
-| **Bosque / Gran Árbol (Cap. 2)** | `mri_00` (`110`) | `EXIT=0`, `0 errs` | `35.95 ms` | `34.35 ms` | **`27.82 FPS`** | `21.11 ms` | 100% limpia (`map_mri_00.png`) |
-| **Rogueport Este (caminado lento + NPCs)** | `gor_01` (`20`) | `EXIT=0`, `0 errs` | `39.88–42.04 ms` | `36.07–39.39 ms` | **`23.78–25.08 FPS`** | `28.38–29.83 ms` | 100% limpia, zancada fluida (`slow_1..4.png`, `final_gor_01.png`) |
-| **Palacio de las Sombras (Cap. 8)** | `las_00` (`380`) | `EXIT=0`, `0 errs` | `42.41 ms` | `37.53 ms` | **`23.58 FPS`** | `32.02 ms` | 100% limpia (`map_las_00.png`) |
-| **Subsuelo de Rogueport** | `tik_00` (`20`) | `EXIT=0`, `0 errs` | `47.52 ms` | `41.96 ms` | **`21.05 FPS`** | `33.49 ms` | 100% limpia (`map_tik_00.png`) |
+*(Nota: el barrido completo de 271 escenas, los soak tests de RAM y la auditoría por lotes de ataques en 30 FPS se ejecutaron sobre el código equivalente justo antes del parche final en `rels/aji/src/aji_17.c`, tras el cual se verificó visualmente y con smoke test la escena `aji_17` y la compilación Release final.)*
 
 ---
 
-### 3. Cambios y verificaciones de `v0.4.3-rk3326`
+## Rendimiento esperado
 
-- **Menú de pausa simplificado (`src/window/win_root.c`, commit `c676d8ff`)**: eliminadas las 3 últimas pestañas añadidas por el port (`Wardrobe` / Vestuario, `Online` / En línea y `Settings` / Ajustes), dejando únicamente las pestañas originales del juego base.
-- **Selector de idioma en script de lanzamiento (`port/portmaster/papercut/PaperCut.sh`)**:
-  - Nueva variable `GAME_LANGUAGE` en la cabecera del script (`"es"` por defecto; acepta `es`/`4`, `en`/`1`, `de`/`2`, `fr`/`3`, `it`/`5` y `auto`).
-  - Exporta `TTYD_LANGUAGE` y sincroniza `language=<1..5>` en `$TTYD_USER_DIR/settings.txt` (documentado también en `port/portmaster/papercut/README_INSTALACION.txt`).
-  - Verificado en hardware RK3326 cambiando entre `GAME_LANGUAGE="fr"` (`language=3`), `"en"` (`language=1`) y `"es"` (`language=4`) con salida `RC=0` y textos verificados visualmente.
-- **Salto con botón en créditos iniciales hacia la pantalla principal de bienvenida (`src/sequence/seq_logo.c`, `rels/dmo/src/dmo_00.c`)**:
-  - Al pulsar cualquier botón (`A`, `B`, `X`, `Y`, `Start`, `L`, `R`, `Z`) durante los logos iniciales (`case 7..16` / `17`), o `Start` en la pantalla de advertencia inicial (`case 5..6`), el juego omite los logos restantes y la escena `dmo_00` para ir directamente a `SEQ_TITLE`.
-  - Si llega a reproducirse la secuencia inicial `dmo_00`, pulsar `A`, `B`, `X`, `Y` o `Start` salta directamente a `"title"` (`SEQ_TITLE`).
-  - Verificado en hardware RK3326 tanto con `Start` en arranque (`SEQ_TITLE` en 118 frames, `RC=0`) como con `B` durante logos (`SEQ_TITLE` en 39 frames, `RC=0`).
+- **Comportamiento por defecto (`[battery] 30fps on`)**: el juego renderiza a **`30 FPS` estables en `640×480` nativo** con la simulación lógica, animaciones de interfaz y ventana de *Action Commands* funcionando a **`60 Hz` reales**.
+- **Escenarios y batallas**: la gran mayoría del juego (campos, pueblos, interiores, batallas y ~97% de las escenas) mantiene margen suficiente para sostener los `30 FPS`.
+- **Zonas de máxima carga**: mapas con gran densidad de partículas, multitudes o geometría (como `yuu_00..03` en la Feria Pianta, `las_29` o `win_06`) pueden oscilar entre **`~25 y 29 FPS`** según el ángulo de cámara, manteniendo la velocidad real de juego a 60 Hz gracias a los *catch-up ticks*.
+- **Primer arranque**: la primera visita a zonas nuevas compila shaders para `cache/pipeline_cache.db`; en arranques posteriores solo se precompilan hasta `1200` programas para evitar tirones de inicio y agotar límites del driver Mali-G31.
+- **Modo 60 FPS opcional**: si deseas desactivar el objetivo de 30 FPS en escenas ligeras, puedes iniciar con `TTYD_NO_MIXED_FPS=1`.
 
 ---
 
-## Instalación en PortMaster (desde el paquete Release)
+## Forma de ejecutar (PortMaster en RK3326)
 
-1. Descarga `papercut-0.4.3-rk3326-portmaster.zip` desde la sección **Releases** de este repositorio.
-2. Descomprime su contenido en la carpeta de puertos de tu consola (`/roms/ports/`), de modo que queden:
+### Instalación
+1. Descarga `papercut-0.5.0-rk3326-portmaster.zip` y verifica su integridad con `SHA256SUMS.txt` desde la sección **Releases**.
+2. Descomprime su contenido dentro de la carpeta de puertos de tu consola (`/roms/ports/`), de modo que queden:
    - `/roms/ports/Paper Cut.sh`
-   - `/roms/ports/papercut/PaperCut.sh`, `ttyd-eu`, `papercut.gptk`, `libs.aarch64/`, `Logo*.jpg`, `saves/settings.txt`
-3. Coloca tu copia legal del disco europeo (**Paper Mario: The Thousand-Year Door PAL / `G8MP01`**) en:
-   `/roms/ports/papercut/game.iso`
-4. Inicia **Paper Cut** desde EmulationStation / PortMaster. *(El primer arranque compilará la caché de shaders en `papercut/cache/`.)*
+   - `/roms/ports/papercut/PaperCut.sh`
+   - `/roms/ports/papercut/ttyd-eu`
+   - `/roms/ports/papercut/papercut.gptk`
+   - `/roms/ports/papercut/libs.aarch64/` (`libSDL3.so.0`, `libpng16.so.16`, `libstdc++.so.6`)
+   - `/roms/ports/papercut/Logo*.jpg`, `README_INSTALACION.txt`, `RK3326_PORT.md`, `saves/settings.txt`
+3. Coloca tu copia legal europea (**Paper Mario: The Thousand-Year Door PAL / `G8MP01`**) en:
+   ```text
+   /roms/ports/papercut/game.iso
+   ```
+4. Inicia **Paper Cut** desde EmulationStation / PortMaster.
+   - **Salir del juego**: combinación `Select + Start` configurada en `papercut/papercut.gptk`.
+
+### Idioma y configuración
+- **Idioma por defecto (`es`)**: configurado en `papercut/PaperCut.sh` (`GAME_LANGUAGE="es"`) y `papercut/saves/settings.txt` (`language=4`). Puedes cambiar `GAME_LANGUAGE` al inicio de `PaperCut.sh` a:
+  - `"es"` o `"4"` (Español)
+  - `"en"` o `"1"` (English)
+  - `"de"` o `"2"` (Deutsch)
+  - `"fr"` o `"3"` (Français)
+  - `"it"` o `"5"` (Italiano)
+  - `"auto"` (usa `saves/settings.txt` o el idioma del sistema)
+- **Variables de entorno útiles** (usadas internamente por `PaperCut.sh` u opcionales):
+  - `TTYD_DISC`: ruta a `game.iso`.
+  - `TTYD_USER_DIR`: carpeta de partidas y configuración (por defecto `/roms/ports/papercut/saves`).
+  - `TTYD_CACHE_DIR`: carpeta de caché de shaders GLES (`pipeline_cache.db`, por defecto `/roms/ports/papercut/cache`).
+  - `TTYD_LANGUAGE`: código de idioma (`es`, `en`, `de`, `fr`, `it`).
+  - `TTYD_NO_MIXED_FPS=1`: desactiva el límite de 30 FPS del modo batería.
+  - `TTYD_MIXED_FPS=1`: fuerza el modo 30 FPS renderizados / 60 Hz lógicos.
 
 ---
 
-## Compilación cruzada (AArch64 / RK3326 sin datos del disco)
+## Forma de compilar (Cross-compilation AArch64 / RK3326)
 
-Requiere sysroot AArch64 (`/opt/rk3326-sysroot`), `clang-21`, `cmake`, `ninja`, `python3` y el submódulo `extern/aurora` (rama `rk3326-gles`):
+Compilación verificada en **Linux / WSL (x86_64)** generando el ejecutable europeo sin recursos del disco (`TTYD_NO_DISC_ASSETS=ON`).
 
+### Requisitos
+- Sysroot AArch64 para RK3326 en `/opt/rk3326-sysroot` (usado por `cmake/toolchains/aarch64-linux-gnu.cmake`).
+- `clang-21`, `clang++-21`, herramientas LLVM 21 (`llvm-ar`, `llvm-nm`, `llvm-objcopy`), `cmake` (>= 3.25), `ninja`, `python3` y `aarch64-linux-gnu-strip`.
+- Submódulo `extern/aurora` inicializado en la rama `rk3326-gles`.
+
+### Pasos de compilación
 ```bash
 git clone --recursive https://github.com/jbcgames/paper-cut.git
 cd paper-cut
+
 cmake -S . -B build-aarch64 -G Ninja \
   --toolchain=cmake/toolchains/aarch64-linux-gnu.cmake \
   -DCMAKE_BUILD_TYPE=Release \
   -DTTYD_VERSION=G8MP01 \
   -DTTYD_BACKEND=aurora \
   -DTTYD_AURORA_GLES=ON \
-  -DTTYD_NO_DISC_ASSETS=ON
+  -DTTYD_NO_DISC_ASSETS=ON \
+  -DTTYD_PORT_VERSION=0.5.0-rk3326
+
 ninja -C build-aarch64 ttyd-eu
+
+aarch64-linux-gnu-strip -o build-aarch64/ttyd-eu.stripped build-aarch64/ttyd-eu
 ```
+
+El binario resultante `build-aarch64/ttyd-eu.stripped` sustituye a `/roms/ports/papercut/ttyd-eu` dentro del paquete PortMaster.
+
+---
+
+## Contributors / Contribuidores
+
+- **Jbcgames** ([@jbcgames](https://github.com/jbcgames)) — Creador y mantenedor del fork para RK3326 / PortMaster (`jbcgames/paper-cut`, `jbcgames/aurora`), empaquetado, configuración del entorno KMSDRM/Mali-G31 y dirección de pruebas en hardware.
+- **Antigravity** (*AI Coding Assistant*, Google DeepMind) — Contribución técnica en análisis y depuración, optimizaciones de rendimiento GLES 3.0 / GX / caché de geometría, sincronización de lógica a 60 Hz en modo 30 FPS, corrección gráfica de ataques y holograma en `aji_17`, automatización de barridos en hardware y documentación.
+- **Proyectos base (Upstream)**:
+  - [LLCOOLT/paper-cut](https://github.com/LLCOOLT/paper-cut) — Descompilación de *Paper Mario: The Thousand-Year Door* y port nativo multiplataforma.
+  - [encounter/aurora](https://github.com/encounter/aurora) — Capa de plataforma GameCube (`GX`, `VI`, `PAD`, `DVD`, `CARD`).
+  - Licencias y avisos de terceros en [docs/THIRD_PARTY.md](docs/THIRD_PARTY.md) y [LICENSE](LICENSE).

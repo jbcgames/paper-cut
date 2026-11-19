@@ -323,7 +323,7 @@ static void effPokopiThunderDisp(CameraId cameraId, EffectEntry* effect) {
     }
     DCFlushRange(vtx, 0x2a0);
     GXInvalidateVtxCache();
-    effSetVtxDescN64(vtx);
+    effSetVtxDescN64Sized(vtx, 48u);
     for (idx = 0; idx < i - 1; idx++) {
         n = idx * 2;
         GXBegin(GX_TRIANGLES, GX_VTXFMT0, 6);

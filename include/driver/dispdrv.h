@@ -21,3 +21,6 @@ void dispSort(void);
 void dispDraw(CameraId cameraId);
 f32 dispCalcZ(Vec* input);
 DispEntry* dispGetCurWork(void);
+#ifdef TARGET_PC
+void portDispForceDrawThisFrame(void);
+#endif

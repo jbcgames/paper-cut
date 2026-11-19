@@ -180,6 +180,9 @@ DispEntry* pDispWork;
 
 // local prototypes
 static s32 _sort(const void* sortA, const void* sortB);
+#ifdef TARGET_PC
+static int sForceDrawThisFrame = 0;
+#endif
 
 /** Allocates the display list of 1024 draw requests and its sort table at boot. */
 void dispInit(void) {
@@ -188,6 +191,9 @@ void dispInit(void) {
     memset(pDispWork, 0, sizeof(DispEntry) * DISP_MAX_ENTRIES);
     memset(pSortWork, 0, sizeof(DispEntry*) * DISP_MAX_ENTRIES);
     entry_n = 0;
+#ifdef TARGET_PC
+    sForceDrawThisFrame = 0;
+#endif
 }
 
 /** Empties the display list at the start of each frame. */
@@ -196,6 +202,7 @@ void dispReInit(void) {
 #ifdef TARGET_PC
     sCamBucketsValid = 0;
     sSortedEntryN = 0;
+    sForceDrawThisFrame = 0;
 #endif
 }
 
@@ -515,6 +522,10 @@ DispEntry* dispGetCurWork(void) {
 extern int portImgHasPendingCapture(void);
 extern DispCallback portExtMakeTexture;
 
+void portDispForceDrawThisFrame(void) {
+    sForceDrawThisFrame = 1;
+}
+
 /**
  * Returns 1 if the queued display list contains work that must not be skipped on an undrawn frame
  * (one-shot offscreen texture builds such as extMakeTexture / puniMakeTexture, or pending imgdrv captures).
@@ -523,6 +534,9 @@ extern DispCallback portExtMakeTexture;
  */
 int portDispMustDraw(void) {
     s32 i;
+    if (sForceDrawThisFrame) {
+        return 1;
+    }
     for (i = 0; i < entry_n; i++) {
         const DispEntry* e = &pDispWork[i];
         if (e->callback == portExtMakeTexture || (e->cameraId == CAMERA_OFFSCREEN && e->param != NULL)) {

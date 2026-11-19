@@ -280,7 +280,7 @@ static void effCloudDisp(CameraId cameraId, EffectEntry* effect) {
     GXSetCullMode(GX_CULL_NONE);
     vtx = (effN64Vtx*)smartAlloc(0x690, 3)->address;
     memset(vtx, 0, 0x690);
-    effSetVtxDescN64(vtx);
+    effSetVtxDescN64Sized(vtx, (u32)(0x690u / sizeof(effN64Vtx)));
     uo = (frame & 0x3F) << 5;
     first = -1;
     zero = 0.0f;

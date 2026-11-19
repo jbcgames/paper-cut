@@ -3848,11 +3848,17 @@ static s32 mobj_kururing_floor(MapObjectEntry* mobj) {
             KURU_POSE_FLAGS(mobj) |= ANIM_POSE_FLAG_TEX_OVERLAY;
             mobj->flags |= MOBJ_FLAG_PAPER_TEX;
             dispEntry(CAMERA_SHADOW, 0.0f, 0, (DispCallback)kururing_capture, mobj);
+#ifdef TARGET_PC
+            portDispForceDrawThisFrame();
+#endif
             break;
         case 1:
             KURU_POSE_FLAGS(mobj) |= ANIM_POSE_FLAG_TEX_OVERLAY;
             mobj->flags |= MOBJ_FLAG_PAPER_TEX;
             dispEntry(CAMERA_SHADOW, 0.0f, 0, (DispCallback)kururing_capture, mobj);
+#ifdef TARGET_PC
+            portDispForceDrawThisFrame();
+#endif
             if (!(animPoseGetLoopTimes(mobj->poseId) < 1.0f)) {
                 KURU_POSE_FLAGS(mobj) &= ~ANIM_POSE_FLAG_TEX_OVERLAY;
                 mobj->flags &= ~MOBJ_FLAG_PAPER_TEX;
@@ -3867,6 +3873,9 @@ static s32 mobj_kururing_floor(MapObjectEntry* mobj) {
             KURU_POSE_FLAGS(mobj) |= ANIM_POSE_FLAG_TEX_OVERLAY;
             mobj->flags |= MOBJ_FLAG_PAPER_TEX;
             dispEntry(CAMERA_SHADOW, 0.0f, 0, (DispCallback)kururing_capture, mobj);
+#ifdef TARGET_PC
+            portDispForceDrawThisFrame();
+#endif
             joint = &animPoseGetAnimPosePtr(mobj->poseId)->worldPositions[0][1];
             item = marioGetPtr();
             if (kururing_in_box(mobj->position.x, mobj->position.z, ((MarioWork*)item)->position.x, ((MarioWork*)item)->position.z, 30.0f)) {
@@ -4001,6 +4010,9 @@ static s32 mobj_trap_floor(MapObjectEntry* mobj) {
             KURU_POSE_FLAGS(mobj) |= ANIM_POSE_FLAG_TEX_OVERLAY;
             mobj->flags |= MOBJ_FLAG_PAPER_TEX;
             dispEntry(CAMERA_SHADOW, 0.0f, 0, (DispCallback)kururing_capture, mobj);
+#ifdef TARGET_PC
+            portDispForceDrawThisFrame();
+#endif
             if (!(animPoseGetLoopTimes(mobj->poseId) < 1.0f)) {
                 KURU_POSE_FLAGS(mobj) &= ~ANIM_POSE_FLAG_TEX_OVERLAY;
                 mobj->flags &= ~MOBJ_FLAG_PAPER_TEX;

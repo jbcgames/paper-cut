@@ -52,6 +52,10 @@ s32 battleAcMain_TimingWide(BattleWork* work) {
     if (ac->acUnit->badgesEquipped.AutoCommand) {
         autoCmd = 1;
     }
+#ifdef TARGET_PC
+    {
+        const s32 prevState = ac->acState;
+#endif
 
     switch (ac->acState) {
         case 0:
@@ -222,6 +226,44 @@ s32 battleAcMain_TimingWide(BattleWork* work) {
             ac->deletecb = NULL;
             return 0;
     }
+#ifdef TARGET_PC
+    if (prevState != 0) {
+        switch (tw->state) {
+            case 0:
+            case 1:
+            case 2:
+                if ((s32)ac->acFlags & TIMING_WIDE_NO_SLIDE_IN) {
+                    disp->iconX = 30.0f;
+                    if (disp->slideTimer > 0) {
+                        disp->slideTimer--;
+                    }
+                } else {
+                    BattleAcStepSlideIn(disp, -300.0f, 30.0f);
+                }
+                break;
+            case 4:
+            case 5: {
+                s32 doOut = 1;
+                if (((s32)ac->acFlags & TIMING_WIDE_STAY_ON_SUCCESS) && (ac->result & 2)) {
+                    doOut = 0;
+                }
+                if (((s32)ac->acFlags & TIMING_WIDE_STAY_ON_FAIL) && !(ac->result & 2)) {
+                    doOut = 0;
+                }
+                if (doOut) {
+                    BattleAcStepSlideOut(disp, 30.0f, -300.0f);
+                } else {
+                    disp->iconX = 30.0f;
+                    if (disp->slideTimer < 60) {
+                        disp->slideTimer++;
+                    }
+                }
+                break;
+            }
+        }
+    }
+    }
+#endif
     return 1;
 }
 
@@ -244,21 +286,26 @@ void battleAcDisp_TimingWide(CameraId cameraId, void* param) {
         case 0:
         case 1:
         case 2:
+#ifndef TARGET_PC
             if ((s32)ac->acFlags & TIMING_WIDE_NO_SLIDE_IN) {
                 disp->iconX = 30.0f;
             } else {
                 disp->iconX = intplGetValue(4, -300.0f, 30.0f, 20 - disp->slideTimer, 20);
             }
+#endif
             actionCommandDisp(disp->iconX, disp->iconY);
+#ifndef TARGET_PC
             if (disp->slideTimer > 0) {
                 disp->slideTimer--;
             }
+#endif
             break;
         case 3:
             actionCommandDisp(disp->iconX, disp->iconY);
             break;
         case 4:
         case 5:
+#ifndef TARGET_PC
             show = 1;
             if (((s32)ac->acFlags & TIMING_WIDE_STAY_ON_SUCCESS) && (ac->result & 2)) {
                 show = 0;
@@ -275,10 +322,15 @@ void battleAcDisp_TimingWide(CameraId cameraId, void* param) {
             } else {
                 disp->iconX = 30.0f;
             }
+#else
+            (void)show;
+#endif
             actionCommandDisp(disp->iconX, disp->iconY);
+#ifndef TARGET_PC
             if (disp->slideTimer < 60) {
                 disp->slideTimer++;
             }
+#endif
             break;
     }
 }

@@ -268,6 +268,11 @@ void PORT_HOOKABLE(statusWinMain)(void) {
     wp->x = wp->openX * t + wp->closeX * inv;
     wp->y = wp->openY * t + wp->closeY * inv;
     valueUpdate();
+#ifdef TARGET_PC
+    if (wp->blinkTimer > 0) {
+        wp->blinkTimer--;
+    }
+#endif
     if (!(wp->flags & STATUSWIN_FLAG_DISP_OFF)) {
         dispEntry(CAMERA_2D, 500.0f, 0, statusWinDisp, NULL);
     }
@@ -354,10 +359,9 @@ static void PORT_HOOKABLE(statusWinDisp)(CameraId camId, void* param) {
     y = wp->y;
     blinkOn = 1;
     if (wp->blinkTimer > 0) {
-#ifdef TARGET_PC
-        if (!portInterpInBetween()) /* a frame between the game's: the same blink */
-#endif
+#ifndef TARGET_PC
         wp->blinkTimer--;
+#endif
         blinkOn = (wp->blinkTimer % 16) >= 6;
     }
 

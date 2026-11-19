@@ -855,6 +855,9 @@ static USER_FUNC(zubastar_bomb) {
     s32 k;
     if (isFirstCall) {
         dispEntry((CameraId)CAMERA_2D, 0.0f, 0, zubastar_capture, NULL);
+#ifdef TARGET_PC
+        portDispForceDrawThisFrame();
+#endif
         w->phase = 0;
         return 0;
     }

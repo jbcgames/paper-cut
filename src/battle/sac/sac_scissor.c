@@ -752,7 +752,16 @@ static s32 star_control(EventEntry* evt, BOOL first) {
             }
             break;
         case 5:
+            break;
         case 6:
+#ifdef TARGET_PC
+            if (w->phase >= 6) {
+                w->phaseTimer += 5;
+                if (w->phaseTimer > 30) {
+                    w->phaseTimer = 30;
+                }
+            }
+#endif
             break;
     }
     if (w->eff) {
@@ -807,10 +816,12 @@ static void star_disp2D_sub(s32 idx, s32 alpha) {
     f32 x, y, z;
     GXColor col;
     if (w->phase >= 6) {
+#ifndef TARGET_PC
         w->phaseTimer++;
         if (w->phaseTimer > 30) {
             w->phaseTimer = 30;
         }
+#endif
         alpha = (s32)intplGetValue(0, (f32)(u8)alpha, 0.0f, w->phaseTimer, 30);
     }
     col = (GXColor){0xFF, 0xFF, 0xFF, 0x00};
@@ -985,10 +996,19 @@ static s32 scissor_control(EventEntry* evt, BOOL first) {
                 }
                 w->smart = smartAlloc(GXGetTexBufferSize(0x260, 0x1E0, 4, 0, 0), 1);
                 dispEntry(CAMERA_2D, 0, 0.0f, scissor_capture, NULL);
+#ifdef TARGET_PC
+                portDispForceDrawThisFrame();
+#endif
                 return 2;
             }
         }
     }
+#ifdef TARGET_PC
+    w->blinkTimer++;
+    if (w->blinkTimer >= 60) {
+        w->blinkTimer -= 60;
+    }
+#endif
     dispEntry(CAMERA_2D, 0, 0.0f, scissor_disp_control, NULL);
     return 0;
 }
@@ -1203,10 +1223,12 @@ static void PORT_HOOKABLE(scissor_disp_control)(CameraId camera, void* param) {
     f32 hh;
     f32 sign;
 #endif
+#ifndef TARGET_PC
     w->blinkTimer = w->blinkTimer + 1;
     if (w->blinkTimer >= 60) {
         w->blinkTimer -= 60;
     }
+#endif
     if (w->blinkTimer <= 29) {
         intplGetValue(0, 0.0f, 255.0f, w->blinkTimer, 29);
     } else {
@@ -1313,6 +1335,9 @@ static void PORT_HOOKABLE(scissor_disp_control)(CameraId camera, void* param) {
 static s32 scissor_offscreen(void) {
     GetScissorPtr();
     dispEntry(CAMERA_OFFSCREEN2, 0.0f, 1, scissor_disp_region, NULL);
+#ifdef TARGET_PC
+    portDispForceDrawThisFrame();
+#endif
     return 2;
 }
 

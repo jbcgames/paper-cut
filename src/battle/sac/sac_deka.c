@@ -237,6 +237,9 @@ static void yuka_init(void) {
         }
     }
     dispEntry(CAMERA_SHADOW, 0.0f, 0, yuka_capture, 0);
+#ifdef TARGET_PC
+    portDispForceDrawThisFrame();
+#endif
 }
 
 /**

@@ -140,6 +140,10 @@ s32 battleAcMain_StickRotate(BattleWork* work) {
     BOOL restart;
     sw = ((StickRotateWork*)ac->work);
     disp = AC_DISP(work);
+#ifdef TARGET_PC
+    {
+        const s32 prevState = ac->acState;
+#endif
 
     do {
         restart = FALSE;
@@ -348,6 +352,51 @@ s32 battleAcMain_StickRotate(BattleWork* work) {
                 break;
         }
     } while (restart);
+#ifdef TARGET_PC
+    if (prevState != 0) {
+        switch (ac->acState) {
+            case 99:
+            case 100:
+            case 1000:
+            case 1001:
+            case 1002:
+            case 1003:
+                BattleAcStepSlideIn(disp, -300.0f, 30.0f);
+                if (!(AC_PARAMS(work)->flags & 2) && (ac->acState == 1000 || ac->acState == 1001)) {
+                    StickRotateParams* p = AC_PARAMS(work);
+                    sw->iconTimer++;
+                    if (sw->iconTimer >= (p->stepsA + p->stepsB) / 2) {
+                        int step;
+                        sw->iconTimer = 0;
+                        step = sw->roll;
+                        if (step == 0) {
+                            step = -1;
+                        }
+                        if (sw->iconDir == 0) {
+                            sw->iconDir = 1;
+                        } else {
+                            sw->iconDir += step;
+                            if (sw->iconDir >= 9) {
+                                sw->iconDir = 1;
+                            } else if (sw->iconDir <= 0) {
+                                sw->iconDir = 8;
+                            }
+                        }
+                    }
+                }
+                break;
+            case 1004:
+            case 1005:
+            case 1006:
+                if (disp->slideTimer > 0) {
+                    disp->slideTimer--;
+                }
+                disp->iconX = disp->slideTimer <= 40 ? intplGetValue(4, -300.0f, 30.0f, disp->slideTimer, 40) : 30.0f;
+                break;
+        }
+    }
+    }
+#endif
     return 1;
 }
 
@@ -373,23 +422,30 @@ void battleAcDisp_StickRotate(CameraId cameraId, void* param) {
     }
     switch (ac->acState) {
         case 99:
+#ifndef TARGET_PC
             disp->iconX = intplGetValue(4, -300.0f, 30.0f, 20 - disp->slideTimer, 20);
+#endif
             fn(disp->iconX, disp->iconY);
+#ifndef TARGET_PC
             if (disp->slideTimer > 0) {
                 disp->slideTimer--;
             }
+#endif
             break;
         case 100:
         case 1000:
         case 1001:
         case 1002:
         case 1003:
+#ifndef TARGET_PC
             disp->iconX = 30.0f;
+#endif
             fn(disp->iconX, disp->iconY);
             break;
         case 1004:
         case 1005:
         case 1006:
+#ifndef TARGET_PC
             if (disp->slideTimer > 0) {
                 disp->slideTimer--;
             }
@@ -398,6 +454,7 @@ void battleAcDisp_StickRotate(CameraId cameraId, void* param) {
             } else {
                 disp->iconX = 30.0f;
             }
+#endif
             fn(disp->iconX, disp->iconY);
             break;
     }
@@ -490,6 +547,7 @@ static void actionCommandDisp2(f32 x, f32 y) {
             break;
         case 1000:
         case 1001:
+#ifndef TARGET_PC
             sw->iconTimer++;
             if (sw->iconTimer >= (p->stepsA + p->stepsB) / 2) {
                 int step;
@@ -509,6 +567,9 @@ static void actionCommandDisp2(f32 x, f32 y) {
                     }
                 }
             }
+#else
+            (void)p;
+#endif
             ICON(v1, _get_icon_id(sw->iconDir));
             break;
         case 1002:

@@ -158,6 +158,10 @@ s32 battleAcMain_Repeatedly(BattleWork* work) {
         autoCmd = TRUE;
     }
     pressed = 0;
+#ifdef TARGET_PC
+    {
+        const s32 prevState = work->actionCommands.acState;
+#endif
     switch (work->actionCommands.acState) {
         case 0:
             memset(d, 0, sizeof(RepeatDisp));
@@ -318,6 +322,30 @@ s32 battleAcMain_Repeatedly(BattleWork* work) {
             work->actionCommands.deletecb = NULL;
             break;
     }
+#ifdef TARGET_PC
+    if (prevState != 0) {
+        switch (work->actionCommands.acState) {
+            case 99:
+            case 100:
+            case 1000:
+            case 1001:
+                BattleAcStepSlideIn((BattleACDispParams*)d, -300.0f, 30.0f);
+                goto step_disp;
+            case 1002:
+            case 1003:
+                BattleAcStepSlideOut((BattleACDispParams*)d, 30.0f, -300.0f);
+            step_disp:
+                BattleAcStepGaugeEase((BattleACDispParams*)d, r->gauge / 100.0f, VERSION_PICK(0.01f, 0.0125f));
+                if ((s32)(u8)r->done == 1 && d->gauge >= 1.0f) {
+                    BattleAcStepColorPulse((BattleACDispParams*)d);
+                }
+                d->frame++;
+                d->frame2++;
+                break;
+        }
+    }
+    }
+#endif
     return 1;
 }
 
@@ -338,23 +366,31 @@ void battleAcDisp_Repeatedly(CameraId cameraId, BattleWork* work) {
         case 100:
         case 1000:
         case 1001:
+#ifndef TARGET_PC
             disp->iconX = intplGetValue(4, -300.0f, 30.0f, 20 - disp->slideTimer, 20);
+#endif
             actionCommandDisp(disp->iconX, disp->iconY);
+#ifndef TARGET_PC
             if (disp->slideTimer > 0) {
                 disp->slideTimer--;
             }
+#endif
             break;
         case 1002:
         case 1003:
+#ifndef TARGET_PC
             if (disp->slideTimer >= 40) {
                 disp->iconX = intplGetValue(4, 30.0f, -300.0f, disp->slideTimer - 40, 20);
             } else {
                 disp->iconX = 30.0f;
             }
+#endif
             actionCommandDisp(disp->iconX, disp->iconY);
+#ifndef TARGET_PC
             if (disp->slideTimer < 60) {
                 disp->slideTimer++;
             }
+#endif
             break;
     }
 }
@@ -469,6 +505,7 @@ static void actionCommandDisp(f32 x, f32 y) {
             }
         }
     }
+#ifndef TARGET_PC
     target = r->gauge / 100.0f;
     if (d->gauge <= target) {
         d->gauge += VERSION_PICK(0.01f, 0.0125f);
@@ -481,9 +518,13 @@ static void actionCommandDisp(f32 x, f32 y) {
             d->gauge = target;
         }
     }
+#else
+    (void)target;
+#endif
     flags = 0;
     if ((s32)(u8)r->done == 1 && d->gauge >= 1.0f) {
         flags |= 1;
+#ifndef TARGET_PC
         ((u8*)&d->color)[1] += d->delta[1];
         ((u8*)&d->color)[2] += d->delta[2];
         if (((u8*)&d->color)[1] <= 0x80 && d->delta[1] < 0) {
@@ -492,6 +533,7 @@ static void actionCommandDisp(f32 x, f32 y) {
         if (((u8*)&d->color)[1] >= 0xF5 && d->delta[1] > 0) {
             d->delta[1] = d->delta[2] = -0x10;
         }
+#endif
     }
     if (r->done == -1) {
         flags |= 2;
@@ -504,6 +546,8 @@ static void actionCommandDisp(f32 x, f32 y) {
         pos.y = 45.0f + y;
         iconDispGx(&pos, ICON_DISP_2D, ICON_096, 1.0f);
     }
+#ifndef TARGET_PC
     d->frame++;
     d->frame2++;
+#endif
 }

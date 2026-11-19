@@ -155,6 +155,10 @@ s32 battleAcMain_RepeatedlyLv(BattleWork* work) {
     if (ac->acUnit->badgesEquipped.AutoCommand) {
         autoCmd = 1;
     }
+#ifdef TARGET_PC
+    {
+        const s32 prevState = ac->acState;
+#endif
     switch (ac->acState) {
         case 0:
             memset(disp, 0, sizeof(BattleACDispParams));
@@ -331,6 +335,35 @@ s32 battleAcMain_RepeatedlyLv(BattleWork* work) {
             ac->deletecb = NULL;
             break;
     }
+#ifdef TARGET_PC
+    if (prevState != 0) {
+        switch (ac->acState) {
+            case 99:
+            case 100:
+            case 1000:
+            case 1001:
+                BattleAcStepSlideIn(disp, -300.0f, 30.0f);
+                goto step_disp;
+            case 1002:
+            case 1003:
+                BattleAcStepSlideOut(disp, 30.0f, -300.0f);
+            step_disp:
+                if (p->state != 2) {
+                    disp->blinkTimer++;
+                }
+                if (ac->acFlags & REPEATEDLY_LV_INSTANT_GAUGE) {
+                    disp->gaugeRatio = p->gauge / 100.0f;
+                } else {
+                    BattleAcStepGaugeEase(disp, p->gauge / 100.0f, (ac->acFlags & REPEATEDLY_LV_FAST_GAUGE) ? 0.02f : 0.01f);
+                }
+                if (p->state == 1 && disp->gaugeRatio >= 1.0f) {
+                    BattleAcStepColorPulse(disp);
+                }
+                break;
+        }
+    }
+    }
+#endif
     return 1;
 }
 
@@ -353,23 +386,31 @@ void battleAcDisp_RepeatedlyLv(CameraId cameraId, BattleWork* work) {
         case 100:
         case 1000:
         case 1001:
+#ifndef TARGET_PC
             disp->iconX = intplGetValue(4, -300.0f, 30.0f, 20 - disp->slideTimer, 20);
+#endif
             actionCommandDisp(disp->iconX, disp->iconY);
+#ifndef TARGET_PC
             if (disp->slideTimer > 0) {
                 disp->slideTimer--;
             }
+#endif
             break;
         case 1002:
         case 1003:
+#ifndef TARGET_PC
             if (disp->slideTimer >= 40) {
                 disp->iconX = intplGetValue(4, 30.0f, -300.0f, disp->slideTimer - 40, 20);
             } else {
                 disp->iconX = 30.0f;
             }
+#endif
             actionCommandDisp(disp->iconX, disp->iconY);
+#ifndef TARGET_PC
             if (disp->slideTimer < 60) {
                 disp->slideTimer++;
             }
+#endif
             break;
     }
 }
@@ -406,7 +447,9 @@ static void actionCommandDisp(f32 x, f32 y) {
         idleB = 0;
         pressedB = 0;
         numIcons = 1;
+#ifndef TARGET_PC
         ac->disp.blinkTimer++;
+#endif
         off1 = 0;
         off0 = 0;
         pressedA = ((BattleACGetButtonIconRetS32Fn)BattleACGetButtonIcon)(p->mask, 1);
@@ -471,6 +514,7 @@ static void actionCommandDisp(f32 x, f32 y) {
             }
         }
     }
+#ifndef TARGET_PC
     target = p->gauge / 100.0f;
     if (disp->gaugeRatio <= target) {
         if (ac->acFlags & REPEATEDLY_LV_FAST_GAUGE) {
@@ -497,10 +541,14 @@ static void actionCommandDisp(f32 x, f32 y) {
             disp->gaugeRatio = target;
         }
     }
+#else
+    (void)target;
+#endif
     count = 0;
     flags = 0;
     if (p->state == 1 && disp->gaugeRatio >= 1.0f) {
         flags |= 1;
+#ifndef TARGET_PC
         disp->color.g += disp->colorStep[1];
         disp->color.b += disp->colorStep[2];
         if (disp->color.g <= 0x80 && disp->colorStep[1] < 0) {
@@ -509,6 +557,7 @@ static void actionCommandDisp(f32 x, f32 y) {
         if (disp->color.g >= 0xF5 && disp->colorStep[1] > 0) {
             disp->colorStep[1] = disp->colorStep[2] = -0x10;
         }
+#endif
     }
     if ((s8)p->state == -1) {
         flags |= 2;

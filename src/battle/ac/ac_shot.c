@@ -85,6 +85,10 @@ s32 battleAcMain_Shot(BattleWork* work) {
     sfx = (0, "SFX_AC_CURSOR_MOVE1");
     ac = &work->actionCommands;
     sw = SH_WORK(ac);
+#ifdef TARGET_PC
+    {
+        const s32 prevState = ac->acState;
+#endif
     do {
         loop = 0;
         switch (ac->acState) {
@@ -263,6 +267,42 @@ s32 battleAcMain_Shot(BattleWork* work) {
                 break;
         }
     } while (loop);
+#ifdef TARGET_PC
+    if (prevState != 0) {
+        BattleACDispParams* disp = SH_DISP(ac);
+        s32 i;
+        switch (ac->acState) {
+            case 99:
+            case 100:
+            case 1000:
+            case 1001:
+            case 1002:
+            case 1003:
+                BattleAcStepSlideIn(disp, -200.0f, 30.0f);
+                goto step_gauge;
+            case 1004:
+            case 1005:
+                BattleAcStepSlideOut(disp, 30.0f, -200.0f);
+            step_gauge:
+                if (!(ac->acFlags & 1)) {
+                    BattleAcStepGaugeEase(disp, sw->speed / 100.0f, 0.01f);
+                    if (disp->gaugeRatio >= 1.0f) {
+                        BattleAcStepColorPulse(disp);
+                    }
+                }
+                break;
+        }
+        for (i = 0; i < 3; i++) {
+            if (sw->ang[i] >= 0.0f && sw->life[i] > 0.0f) {
+                sw->life[i] -= 1.0f;
+                if (sw->life[i] <= 0.0f) {
+                    sw->ang[i] = -1.0f;
+                }
+            }
+        }
+    }
+    }
+#endif
     if (ac->acState == 1000 || ac->acState == 1001) {
         dispEntry(CAMERA_2D, 900.0f, 1, _disp_target_mark, work);
     }
@@ -292,23 +332,31 @@ void battleAcDisp_Shot(CameraId cameraId, void* param) {
         case 1001:
         case 1002:
         case 1003:
+#ifndef TARGET_PC
             disp->iconX = intplGetValue(4, -200.0f, 30.0f, 20 - disp->slideTimer, 20);
+#endif
             actionCommandDisp(disp->iconX, disp->iconY);
+#ifndef TARGET_PC
             if (disp->slideTimer > 0) {
                 disp->slideTimer--;
             }
+#endif
             break;
         case 1004:
         case 1005:
+#ifndef TARGET_PC
             if (disp->slideTimer >= 40) {
                 disp->iconX = intplGetValue(4, 30.0f, -200.0f, disp->slideTimer - 40, 20);
             } else {
                 disp->iconX = 30.0f;
             }
+#endif
             actionCommandDisp(disp->iconX, disp->iconY);
+#ifndef TARGET_PC
             if (disp->slideTimer < 60) {
                 disp->slideTimer++;
             }
+#endif
             break;
     }
 }
@@ -352,6 +400,7 @@ static void actionCommandDisp(f32 x, f32 y) {
         pos.x = px;
         pos.y = 25.0f + y;
         iconDispGx(&pos, ICON_DISP_2D, ICON_08C, 1.0f);
+#ifndef TARGET_PC
         limit = sw->speed / 100.0f;
         if (disp->gaugeRatio <= limit) {
             disp->gaugeRatio += 0.01f;
@@ -374,6 +423,10 @@ static void actionCommandDisp(f32 x, f32 y) {
                 disp->colorStep[1] = disp->colorStep[2] = -16;
             }
         }
+#else
+        (void)sw;
+        (void)limit;
+#endif
         MTXTrans(m1, px - 88.0f * (1.0f - disp->gaugeRatio), 33.0f + y, 0.0f);
         MTXScale(m2, disp->gaugeRatio, 1.0f, 1.0f);
         MTXConcat(m1, m2, m3);
@@ -419,7 +472,9 @@ static void _disp_target_mark_afterimage(CameraId cameraId, void* param) {
         if (sw->ang[i] >= 0.0f && sw->life[i] > 0.0f) {
             Vec in;
             Vec out;
+#ifndef TARGET_PC
             sw->life[i] -= 1.0f;
+#endif
             in.x = 60.0f * sinfd(sw->ang[i]) + sw->unitPos.x;
             in.y = 60.0f * cosfd(sw->ang[i]) + sw->unitPos.y;
             in.z = sw->unitPos.z;
@@ -430,9 +485,11 @@ static void _disp_target_mark_afterimage(CameraId cameraId, void* param) {
                 u8 a = (u8)intplGetValue(0, 255.0f, 0.0f, (s32)(30.0f - sw->life[i]), 30);
                 _draw_target_mark((GXColor){0x90, 0x80, 0xA0, a}, out.x, out.y, out.z, sw->spin[i]);
             }
+#ifndef TARGET_PC
             if (sw->life[i] <= 0.0f) {
                 sw->ang[i] = -1.0f;
             }
+#endif
         }
     }
 }

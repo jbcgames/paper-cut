@@ -125,6 +125,9 @@ s32 battleAcMain_MonosiriTarget(BattleWork* work) {
                 }
                 work->actionCommands.acState = 1002;
             }
+#ifdef TARGET_PC
+            cw->angle += 2.0f;
+#endif
             break;
         case 1002:
             cw->endTimer = 60;
@@ -209,7 +212,9 @@ static void actionCommandDisp(f32 x, f32 y) {
     screen2.y -= 4.0f;
     screen2.z -= 2.0f;
     btlDispTex4(BTL_TEX(0x41), screen2, (Vec){1.0f, 1.0f, 1.0f}, (Vec){0.0f, 0.0f, cw->angle}, (GXColor){128, 128, 128, 255});
+#ifndef TARGET_PC
     cw->angle += 2.0f;
+#endif
 
     pressedIcon = ((BattleACGetButtonIconRetS32Fn)BattleACGetButtonIcon)(PAD_BUTTON_A, 1);
     icon = ((BattleACGetButtonIconRetS32Fn)BattleACGetButtonIcon)(PAD_BUTTON_A, 0);

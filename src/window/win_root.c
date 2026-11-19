@@ -401,6 +401,9 @@ s32 PORT_HOOKABLE(winRootMain)(WindowWork* w) {
             w->texBuf = smartAlloc(GXGetTexBufferSize(gp->fbWidth, gp->efbHeight, GX_TF_RGB565, GX_FALSE, 0), 1);
             w->texBufValid = 0;
             dispEntry(CAMERA_2D, 1000.0f, 0, winRootBgCaptureDisp, w);
+#ifdef TARGET_PC
+            portDispForceDrawThisFrame();
+#endif
 #endif
             break;
         case 10:

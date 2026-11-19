@@ -177,6 +177,28 @@ static void effKemuri8Main(EffectEntry* effect) {
         work->speed += work->accel;
         work->position.x += work->speed * work->sinAngle;
         work->position.y += work->speed * work->cosAngle;
+#ifdef TARGET_PC
+        if (work->flag) {
+            s32 c5 = 255;
+            s32 c6 = 255;
+            s32 c7 = 255 - work->counter * 60;
+            if (c7 < 0) {
+                c6 = 255 + (s32)(0.8f * (f32)c7);
+                c7 = 0;
+                if (c6 < 0) {
+                    c5 = 255 + (s32)(0.4f * (f32)c6);
+                    c6 = 0;
+                    if (c5 < 0) {
+                        c5 = 0;
+                    }
+                }
+            }
+            work->r = c5;
+            work->g = c6;
+            work->b = c7;
+            work->counter++;
+        }
+#endif
     }
     dispEntry(camId, dispCalcZ(&position), 2, (DispCallback)effKemuri8Disp, effect);
 }
@@ -269,6 +291,7 @@ static void effKemuri8Disp(CameraId cameraId, EffectEntry* effect) {
                 GXLoadPosMtxImm(mtx, GX_PNMTX0);
             } else {
                 if (work->flag) {
+#ifndef TARGET_PC
                     s32 c5;
                     s32 c6;
                     s32 c7;
@@ -290,6 +313,7 @@ static void effKemuri8Disp(CameraId cameraId, EffectEntry* effect) {
                     work->g = c6;
                     work->b = c7;
                     work->counter++;
+#endif
                 }
                 GXSetChanMatColor(GX_COLOR0A0, (GXColor){work->r, work->g, work->b, work->a});
                 PSMTXTrans(mtx, work->position.x, work->position.y, work->position.z);

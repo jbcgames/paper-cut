@@ -230,7 +230,7 @@ static void effKamekiTornadeDisp(CameraId cameraId, EffectEntry* effect) {
     PSMTXConcat(rot, base, base);
     for (i = 0; i < 7; i++) {
         vtx = (effN64Vtx*)smartAlloc(sizeof(effN64Vtx) * 32, 3)->address;
-        effSetVtxDescN64(vtx);
+        effSetVtxDescN64Sized(vtx, 32u);
         PSMTXTrans(mtx, 10.0f * work->px[i], 10.0f * work->py[i], 10.0f * work->pz[i]);
         PSMTXRotRad(rot, 'z', 0.017453292f * work->rot[i]);
         PSMTXConcat(mtx, rot, mtx);

@@ -282,7 +282,7 @@ static void effOpukuWgunDisp(CameraId cameraId, EffectEntry* effect) {
     }
     DCFlushRange(vtx, sizeof(effN64Vtx) * 48);
     GXInvalidateVtxCache();
-    effSetVtxDescN64(vtx);
+    effSetVtxDescN64Sized(vtx, 48u);
     GXLoadPosMtxImm(camera->view, GX_PNMTX0);
     GXSetCurrentMtx(GX_PNMTX0);
     if (type == 0) {

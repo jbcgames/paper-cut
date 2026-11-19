@@ -459,7 +459,7 @@ static void effFlameDisp(CameraId cameraId, EffectEntry* effect) {
     GXInvalidateVtxCache();
     DCFlushRange(work[0]->vtx, sizeof(work[0]->vtx));
     GXSetCullMode(GX_CULL_NONE);
-    effSetVtxDescN64(work[0]->vtx);
+    effSetVtxDescN64Sized(work[0]->vtx, 8u);
     GXLoadPosMtxImm(camera->view, GX_PNMTX0);
     GXSetCurrentMtx(GX_PNMTX0);
     GXSetTevColor(GX_TEVREG0, (GXColor){work[0]->c0r, work[0]->c0g, work[0]->c0b, alpha});

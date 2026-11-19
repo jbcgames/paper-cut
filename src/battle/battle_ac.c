@@ -23,6 +23,7 @@
 static s32 BattleACPadCheckRecordTrigger(s32 chan, s32 mask);
 
 #ifdef TARGET_PC
+#include "system.h"
 void portAcCueUpdate(BattleWork* wp); /* port/src/common/ac_cue_pc.c */
 void portAcCueJudged(int kind, int result);
 BattleWorkPad* portSecondPlayerGuardPad(BattleUnit* unit); /* port/src/common/second_player_pc.c */
@@ -707,6 +708,47 @@ void PORT_HOOKABLE(BattleAcGaugeSeDelete)(void) {
     }
 }
 #pragma optimize_for_size reset
+
+#ifdef TARGET_PC
+void BattleAcStepSlideIn(BattleACDispParams* disp, f32 fromX, f32 toX) {
+    if (disp->slideTimer > 0) {
+        disp->slideTimer--;
+    }
+    disp->iconX = disp->slideTimer > 0 ? intplGetValue(4, fromX, toX, 20 - disp->slideTimer, 20) : toX;
+}
+
+void BattleAcStepSlideOut(BattleACDispParams* disp, f32 fromX, f32 toX) {
+    if (disp->slideTimer < 60) {
+        disp->slideTimer++;
+    }
+    disp->iconX = disp->slideTimer >= 40 ? intplGetValue(4, fromX, toX, disp->slideTimer - 40, 20) : fromX;
+}
+
+void BattleAcStepGaugeEase(BattleACDispParams* disp, f32 target, f32 step) {
+    if (disp->gaugeRatio <= target) {
+        disp->gaugeRatio += step;
+        if (disp->gaugeRatio > target) {
+            disp->gaugeRatio = target;
+        }
+    } else {
+        disp->gaugeRatio -= step;
+        if (disp->gaugeRatio < target) {
+            disp->gaugeRatio = target;
+        }
+    }
+}
+
+void BattleAcStepColorPulse(BattleACDispParams* disp) {
+    disp->color.g += disp->colorStep[1];
+    disp->color.b += disp->colorStep[2];
+    if (disp->color.g <= 0x80 && disp->colorStep[1] < 0) {
+        disp->colorStep[1] = disp->colorStep[2] = 0x10;
+    }
+    if (disp->color.g >= 0xF5 && disp->colorStep[1] > 0) {
+        disp->colorStep[1] = disp->colorStep[2] = -0x10;
+    }
+}
+#endif
 
 #ifdef PORT_MODS
 #include "port/hooks/src_battle_battle_ac.inc"

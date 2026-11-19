@@ -32,6 +32,9 @@ s32 battleAcMain_PowerGaugeLv(BattleWork* work) {
     BattleActions* ac = &work->actionCommands;
     PowerGaugeLvWork* tw = PG_WORK(ac);
     BattleACDispParams* disp = &ac->disp;
+#ifdef TARGET_PC
+    const s32 prevState = work->actionCommands.acState;
+#endif
 
     switch (work->actionCommands.acState) {
         case 99:
@@ -131,6 +134,22 @@ s32 battleAcMain_PowerGaugeLv(BattleWork* work) {
             work->actionCommands.deletecb = NULL;
             return 0;
     }
+#ifdef TARGET_PC
+    if (prevState != 0) {
+        switch (work->actionCommands.acState) {
+            case 99:
+            case 100:
+            case 1000:
+            case 1002:
+                BattleAcStepSlideIn(disp, -300.0f, 30.0f);
+                break;
+            case 1003:
+            case 1004:
+                BattleAcStepSlideOut(disp, 30.0f, -300.0f);
+                break;
+        }
+    }
+#endif
     return 1;
 }
 
@@ -151,26 +170,34 @@ void battleAcDisp_PowerGaugeLv(CameraId cameraId, void* param) {
     BattleACDispParams* disp = &ac->disp;
     switch (ac->acState) {
         case 99:
+#ifndef TARGET_PC
             disp->iconX = intplGetValue(4, -300.0f, 30.0f, 20 - disp->slideTimer, 20);
+#endif
         case 100:
         case 1000:
         case 1002:
             actionCommandDisp(disp->iconX, disp->iconY);
+#ifndef TARGET_PC
             if (disp->slideTimer > 0) {
                 disp->slideTimer--;
             }
+#endif
             break;
         case 1003:
         case 1004:
+#ifndef TARGET_PC
             if (disp->slideTimer >= 40) {
                 disp->iconX = intplGetValue(4, 30.0f, -300.0f, disp->slideTimer - 40, 20);
             } else {
                 disp->iconX = 30.0f;
             }
+#endif
             actionCommandDisp(disp->iconX, disp->iconY);
+#ifndef TARGET_PC
             if (disp->slideTimer < 60) {
                 disp->slideTimer++;
             }
+#endif
             break;
     }
 }

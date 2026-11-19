@@ -253,7 +253,7 @@ static void effMagicHoraoDisp(CameraId cameraId, EffectEntry* effect) {
         }
         DCFlushRange(vtx, sizeof(effN64Vtx) * 32);
         GXInvalidateVtxCache();
-        effSetVtxDescN64(vtx);
+        effSetVtxDescN64Sized(vtx, 32u);
         for (i = 0; i < 15; i++) {
             j = i * 2;
             GXBegin(GX_TRIANGLES, GX_VTXFMT0, 6);

@@ -208,6 +208,25 @@ static void effPacknBfireMain(EffectEntry* effect) {
                 }
                 break;
         }
+#ifdef TARGET_PC
+        if (type != 0) {
+            EffPacknBfireWork* fw = effect->userdata;
+            for (i = 0; i < effect->count; i++, fw++) {
+                f32 ang;
+                fw->uvx += fw->duvx;
+                fw->uvy += fw->duvy;
+                ang = 6.2831855f * (fw->rot - angleABf(0.0f, 0.0f, fw->vel.x, fw->vel.y)) / 360.0f;
+                fw->duvx = (f32)sin(ang);
+                fw->duvy = (f32)cos(ang);
+                if (fw->uvx < 0.0f) {
+                    fw->uvx += 128.0f;
+                }
+                if (fw->uvy > 128.0f) {
+                    fw->uvy -= 128.0f;
+                }
+            }
+        }
+#endif
         dispEntry(CAMERA_3D, dispCalcZ(&position), 2, (DispCallback)effPacknBfireDisp, effect);
     }
 }
@@ -274,6 +293,7 @@ static void effPacknBfireDisp(CameraId cameraId, EffectEntry* effect) {
         GXSetCullMode(GX_CULL_NONE);
         effSetVtxDescN64(size64x64_tex32x32_vtx);
         for (i = 0; i < effect->count; i++, work++) {
+#ifndef TARGET_PC
             work->uvx += work->duvx;
             work->uvy += work->duvy;
             angle = 6.2831855f * (work->rot - angleABf(0.0f, 0.0f, work->vel.x, work->vel.y)) / 360.0f;
@@ -285,6 +305,9 @@ static void effPacknBfireDisp(CameraId cameraId, EffectEntry* effect) {
             if (work->uvy > 128.0f) {
                 work->uvy -= 128.0f;
             }
+#else
+            (void)angle;
+#endif
             PSMTXTrans(scale, work->pos.x, work->pos.y, work->pos.z);
             PSMTXRotRad(rot, 'y', 0.017453292f * -camGetPtr(CAMERA_3D)->viewYaw);
             PSMTXScale(mtx, sc, sc, sc);

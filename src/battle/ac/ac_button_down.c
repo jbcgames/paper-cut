@@ -48,6 +48,10 @@ s32 battleAcMain_ButtonDown(BattleWork* work) {
         flag = 1;
     }
     sfx = (0, "SFX_AC_BUTTON_PUSH1");
+#ifdef TARGET_PC
+    {
+        const s32 prevState = ac->acState;
+#endif
     do {
         allDone = 0;
         switch (ac->acState) {
@@ -184,6 +188,9 @@ s32 battleAcMain_ButtonDown(BattleWork* work) {
                                 ac->acState = 1001;
                                 break;
                             }
+#ifdef TARGET_PC
+                            disp->iconX = 0.0f;
+#endif
                             return 1;
                         } else {
                             done = 0;
@@ -245,6 +252,20 @@ s32 battleAcMain_ButtonDown(BattleWork* work) {
         }
 
     } while (allDone);
+#ifdef TARGET_PC
+    if (prevState != 0) {
+        switch (ac->acState) {
+            case 99:
+            case 0:
+                BattleAcStepSlideIn(disp, -300.0f, 0.0f);
+                break;
+            default:
+                disp->iconX = 0.0f;
+                break;
+        }
+    }
+    }
+#endif
     return 1;
 }
 
@@ -266,10 +287,14 @@ void battleAcDisp_ButtonDown(CameraId cameraId, void* param) {
     switch (ac->acState) {
         case 99:
         case 0:
+#ifndef TARGET_PC
             if (disp->slideTimer > 0) {
                 disp->slideTimer--;
             }
             x = intplGetValue(4, -300.0f, 0.0f, 20 - disp->slideTimer, 20);
+#else
+            x = disp->iconX;
+#endif
             y = 0.0f;
             break;
         default:

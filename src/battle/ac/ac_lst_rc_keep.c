@@ -51,6 +51,10 @@ s32 battleAcMain_LstRcKeep(BattleWork* work) {
     if (ac->acUnit->badgesEquipped.AutoCommand) {
         autoCmd = 1;
     }
+#ifdef TARGET_PC
+    {
+        const s32 prevState = ac->acState;
+#endif
     do {
         loop = 0;
         switch (ac->acState) {
@@ -215,6 +219,32 @@ s32 battleAcMain_LstRcKeep(BattleWork* work) {
                 break;
         }
     } while (loop);
+#ifdef TARGET_PC
+    if (prevState != 0) {
+        switch (ac->acState) {
+            case 99:
+            case 100:
+            case 1000:
+                disp->iconStep = -1;
+                BattleAcStepSlideIn(disp, -300.0f, 30.0f);
+                break;
+            case 1001:
+                disp->iconStep = lw->count - 1;
+                BattleAcStepSlideIn(disp, -300.0f, 30.0f);
+                break;
+            case 1002:
+            case 1003:
+            case 1004:
+                disp->iconX = 30.0f;
+                break;
+            case 1005:
+            case 1006:
+                BattleAcStepSlideOut(disp, 30.0f, -300.0f);
+                break;
+        }
+    }
+    }
+#endif
     return 1;
 }
 
@@ -236,20 +266,30 @@ void battleAcDisp_LstRcKeep(CameraId cameraId, void* param) {
         case 99:
         case 100:
         case 1000:
+#ifndef TARGET_PC
             disp->iconStep = -1;
             disp->iconX = intplGetValue(4, -300.0f, 30.0f, 20 - disp->slideTimer, 20);
+#endif
             actionCommandDisp(disp->iconX, disp->iconY, disp->iconStep);
+#ifndef TARGET_PC
             if (disp->slideTimer > 0) {
                 (disp->slideTimer)--;
             }
+#endif
             break;
         case 1001:
+#ifndef TARGET_PC
             disp->iconStep = lw->count - 1;
             disp->iconX = intplGetValue(4, -300.0f, 30.0f, 20 - disp->slideTimer, 20);
+#else
+            (void)lw;
+#endif
             actionCommandDisp(disp->iconX, disp->iconY, disp->iconStep);
+#ifndef TARGET_PC
             if (disp->slideTimer > 0) {
                 (disp->slideTimer)--;
             }
+#endif
             break;
         case 1002:
         case 1003:
@@ -258,15 +298,19 @@ void battleAcDisp_LstRcKeep(CameraId cameraId, void* param) {
             break;
         case 1005:
         case 1006:
+#ifndef TARGET_PC
             if (disp->slideTimer >= 40) {
                 disp->iconX = intplGetValue(4, 30.0f, -300.0f, disp->slideTimer - 40, 20);
             } else {
                 disp->iconX = 30.0f;
             }
+#endif
             actionCommandDisp(disp->iconX, disp->iconY, disp->iconStep);
+#ifndef TARGET_PC
             if (disp->slideTimer < 60) {
                 (disp->slideTimer)++;
             }
+#endif
             break;
     }
 }

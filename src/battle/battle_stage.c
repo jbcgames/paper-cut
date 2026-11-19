@@ -927,6 +927,9 @@ static void screen_capture(CameraId camId, void* param) {
 /** Script helper with no arguments: queues screen_capture for this frame. */
 static USER_FUNC(screen_evt_func) {
     dispEntry(CAMERA_2D, 1000.0f, 0, screen_capture, NULL);
+#ifdef TARGET_PC
+    portDispForceDrawThisFrame();
+#endif
     return 0;
 }
 

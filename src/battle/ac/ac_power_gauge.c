@@ -48,6 +48,10 @@ s32 battleAcMain_PowerGauge(BattleWork* work) {
     if (ac->acUnit->badgesEquipped.AutoCommand) {
         isAuto = TRUE;
     }
+#ifdef TARGET_PC
+    {
+        const s32 prevState = ac->acState;
+#endif
 
     switch (ac->acState) {
         case 0:
@@ -234,6 +238,24 @@ s32 battleAcMain_PowerGauge(BattleWork* work) {
             ac->deletecb = NULL;
             return 0;
     }
+#ifdef TARGET_PC
+    if (prevState != 0) {
+        switch (ac->acState) {
+            case 99:
+            case 100:
+            case 1000:
+            case 1001:
+            case 1003:
+                BattleAcStepSlideIn(disp, -300.0f, 30.0f);
+                break;
+            case 1004:
+            case 1005:
+                BattleAcStepSlideOut(disp, 30.0f, -300.0f);
+                break;
+        }
+    }
+    }
+#endif
     return 1;
 }
 
@@ -251,27 +273,35 @@ void battleAcDisp_PowerGauge(CameraId cameraId, BattleWork* work) {
     BattleACDispParams* disp = (BattleACDispParams*)&ac->disp;
     switch (ac->acState) {
         case 99:
+#ifndef TARGET_PC
             disp->iconX = intplGetValue(4, -300.0f, 30.0f, 20 - disp->slideTimer, 20);
+#endif
         case 100:
         case 1000:
         case 1001:
         case 1003:
             actionCommandDisp(disp->iconX, disp->iconY);
+#ifndef TARGET_PC
             if (disp->slideTimer > 0) {
                 disp->slideTimer--;
             }
+#endif
             break;
         case 1004:
         case 1005:
+#ifndef TARGET_PC
             if (disp->slideTimer >= 40) {
                 disp->iconX = intplGetValue(4, 30.0f, -300.0f, disp->slideTimer - 40, 20);
             } else {
                 disp->iconX = 30.0f;
             }
+#endif
             actionCommandDisp(disp->iconX, disp->iconY);
+#ifndef TARGET_PC
             if (disp->slideTimer < 60) {
                 disp->slideTimer++;
             }
+#endif
             break;
     }
 }

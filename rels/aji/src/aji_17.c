@@ -3339,8 +3339,10 @@ static void disp_horogram(CameraId cameraId, void* param) {
         GXGetCullMode(&cull);
         GXInitTexObj(&horogram_wp->tex0, horogram_wp->buf0, 0x130, 0xF0, GX_TF_RGBA8, GX_CLAMP, GX_CLAMP, GX_FALSE);
         GXInitTexObjLOD(&horogram_wp->tex0, GX_NEAR, GX_NEAR, 0.0f, 0.0f, 0.0f, GX_FALSE, GX_FALSE, GX_ANISO_1);
+#ifndef TARGET_PC
         GXInitTexObj(&horogram_wp->tex1, horogram_wp->buf1, 0x130, 0xF0, GX_TF_Z8, GX_CLAMP, GX_CLAMP, GX_FALSE);
         GXInitTexObjLOD(&horogram_wp->tex1, GX_NEAR, GX_NEAR, 0.0f, 0.0f, 0.0f, GX_FALSE, GX_FALSE, GX_ANISO_1);
+#endif
         PSMTXTrans(trans, npc->position.x, npc->position.y, npc->position.z);
         angle = reviseAngle(-npc->direction);
         angle -= camGetPtr(cameraId)->viewYaw;
@@ -3350,7 +3352,9 @@ static void disp_horogram(CameraId cameraId, void* param) {
         PSMTXConcat(camGetPtr(cameraId)->view, mtx, mtx);
         GXSetCurrentMtx(0);
         GXLoadTexObj(&horogram_wp->tex0, GX_TEXMAP0);
+#ifndef TARGET_PC
         GXLoadTexObj(&horogram_wp->tex1, GX_TEXMAP1);
+#endif
         GXClearVtxDesc();
         GXSetVtxDesc(GX_VA_POS, GX_DIRECT);
         GXSetVtxAttrFmt(GX_VTXFMT0, GX_VA_POS, GX_POS_XYZ, GX_F32, 0);
@@ -3363,6 +3367,15 @@ static void disp_horogram(CameraId cameraId, void* param) {
         GXSetChanAmbColor(GX_COLOR0A0, horogram_amb);
         GXSetNumTexGens(1);
         GXSetTexCoordGen2(GX_TEXCOORD0, GX_TG_MTX2x4, GX_TG_TEX0, GX_IDENTITY, GX_FALSE, GX_PTIDENTITY);
+#ifdef TARGET_PC
+        /* Aurora skips depth EFB copies (GX_TF_Z8); mask the quad using captured coverage alpha from buf0 instead. */
+        GXSetNumTevStages(1);
+        GXSetTevOrder(GX_TEVSTAGE0, GX_TEXCOORD0, GX_TEXMAP0, GX_COLOR0A0);
+        GXSetTevColorOp(GX_TEVSTAGE0, GX_TEV_ADD, GX_TB_ZERO, GX_CS_SCALE_1, GX_TRUE, GX_TEVPREV);
+        GXSetTevAlphaOp(GX_TEVSTAGE0, GX_TEV_ADD, GX_TB_ZERO, GX_CS_SCALE_1, GX_TRUE, GX_TEVPREV);
+        GXSetTevColorIn(GX_TEVSTAGE0, GX_CC_ZERO, GX_CC_ZERO, GX_CC_ZERO, GX_CC_TEXC);
+        GXSetTevAlphaIn(GX_TEVSTAGE0, GX_CA_ZERO, GX_CA_TEXA, GX_CA_RASA, GX_CA_ZERO);
+#else
         GXSetNumTevStages(2);
         GXSetTevOrder(GX_TEVSTAGE0, GX_TEXCOORD0, GX_TEXMAP0, GX_COLOR0A0);
         GXSetTevColorOp(GX_TEVSTAGE0, GX_TEV_ADD, GX_TB_ZERO, GX_CS_SCALE_1, GX_TRUE, GX_TEVREG0);
@@ -3374,6 +3387,7 @@ static void disp_horogram(CameraId cameraId, void* param) {
         GXSetTevAlphaOp(GX_TEVSTAGE1, GX_TEV_ADD, GX_TB_ZERO, GX_CS_SCALE_1, GX_TRUE, GX_TEVPREV);
         GXSetTevColorIn(GX_TEVSTAGE1, GX_CC_C0, GX_CC_ZERO, GX_CC_ZERO, GX_CC_ZERO);
         GXSetTevAlphaIn(GX_TEVSTAGE1, GX_CA_A0, GX_CA_ZERO, GX_CA_TEXA, GX_CA_ZERO);
+#endif
         GXSetCullMode(GX_CULL_NONE);
         GXLoadPosMtxImm(mtx, GX_PNMTX0);
         GXBegin(GX_QUADS, GX_VTXFMT0, 4);
@@ -3453,9 +3467,24 @@ static void peach_capture(CameraId cameraId, void* param) {
     PSMTXIdentity(ident);
     animPoseSetMaterialFlagOff(npc->poseId, ANIM_MATERIAL_FLAG_EVT_COLOR);
     animPoseMain(npc->poseId);
+#ifdef TARGET_PC
+    /* Write silhouette alpha into EFB buf0 (dispDraw disables AlphaUpdate on CAMERA_3D). */
+    GXSetAlphaUpdate(GX_TRUE);
+#endif
     animPoseDrawMtx(npc->poseId, ident, 1, 0.0f, 1.0f);
     animPoseDrawMtx(npc->poseId, ident, 2, 0.0f, 1.0f);
+#ifdef TARGET_PC
+    GXSetAlphaUpdate(GX_FALSE);
+#endif
     animPoseDrawMtx(npc->poseId, ident, 3, 0.0f, 1.0f);
+#ifdef TARGET_PC
+    GXSetAlphaUpdate(GX_TRUE);
+    GXSetTexCopySrc(0, 0, 0x260, 0x1E0);
+    GXSetTexCopyDst(0x130, 0xF0, GX_TF_RGBA8, GX_TRUE);
+    GXCopyTex(horogram_wp->buf0, GX_TRUE);
+    GXPixModeSync();
+    GXSetAlphaUpdate(GX_FALSE);
+#else
     GXSetTexCopySrc(0, 0, 0x260, 0x1E0);
     GXSetTexCopyDst(0x130, 0xF0, GX_TF_RGBA8, GX_TRUE);
     GXCopyTex(horogram_wp->buf0, GX_FALSE);
@@ -3463,6 +3492,7 @@ static void peach_capture(CameraId cameraId, void* param) {
     GXSetTexCopyDst(0x130, 0xF0, GX_TF_Z8, GX_TRUE);
     GXCopyTex(horogram_wp->buf1, GX_TRUE);
     GXPixModeSync();
+#endif
     PSMTXCopy(saved.view, camGetCurPtr()->view);
     GXSetViewport(viewport[0], viewport[1], viewport[2], viewport[3], viewport[4], viewport[5]);
     GXSetProjectionv(proj);

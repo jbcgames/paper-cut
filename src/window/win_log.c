@@ -1696,6 +1696,9 @@ void PORT_HOOKABLE(monosiriMain)(MonosiriWork* m) {
                     animPoseMain(m->pose1);
                 }
                 dispEntry(2, 0.0f, 6, capture, m);
+#ifdef TARGET_PC
+                portDispForceDrawThisFrame();
+#endif
             }
             break;
         case 2:
@@ -1708,6 +1711,7 @@ void PORT_HOOKABLE(monosiriMain)(MonosiriWork* m) {
     if (m->state == 1 && m->pose1 != -1 && m->alpha >= 255 && portTattleViewOn()) {
         animPoseMain(m->pose1);
         dispEntry(2, 0.0f, 6, capture, m);
+        portDispForceDrawThisFrame();
     }
 #endif
     m->curX += (m->x - m->curX) / FPS_EASE(6.0f);

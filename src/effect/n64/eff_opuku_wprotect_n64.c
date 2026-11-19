@@ -341,7 +341,7 @@ static void effOpukuWprotectDisp(CameraId cameraId, EffectEntry* effect) {
     PSMTXConcat(mtx, scale, scale);
     GXLoadPosMtxImm(scale, GX_PNMTX0);
     GXSetCurrentMtx(GX_PNMTX0);
-    effSetVtxDescN64(vtx);
+    effSetVtxDescN64Sized(vtx, 80u);
     GXBegin(GX_TRIANGLES, GX_VTXFMT0, 60);
     tri2(0, 1, 2, 0, 0, 2, 3, 0);
     tri2(4, 0, 3, 0, 4, 3, 5, 0);
@@ -353,7 +353,7 @@ static void effOpukuWprotectDisp(CameraId cameraId, EffectEntry* effect) {
     tri2(22, 23, 4, 0, 22, 4, 5, 0);
     tri2(24, 25, 26, 0, 24, 26, 27, 0);
     tri2(26, 28, 29, 0, 26, 29, 27, 0);
-    effSetVtxDescN64(vtx + 28);
+    effSetVtxDescN64Sized(vtx + 28, 52u);
     GXBegin(GX_TRIANGLES, GX_VTXFMT0, 24);
     tri2(0, 2, 6, 0, 0, 6, 1, 0);
     tri2(3, 7, 4, 0, 3, 4, 8, 0);

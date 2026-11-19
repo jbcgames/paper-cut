@@ -65,6 +65,10 @@ s32 battleAcMain_ShotTarget(BattleWork* work) {
         autoCommand = TRUE;
     }
     difficulty = work->actionCommands.params[3];
+#ifdef TARGET_PC
+    {
+        const s32 prevState = ac->acState;
+#endif
     do {
         sfxName = "SFX_AC_CURSOR_MOVE1";
         repeat = FALSE;
@@ -188,6 +192,28 @@ s32 battleAcMain_ShotTarget(BattleWork* work) {
                 break;
         }
     } while (repeat);
+#ifdef TARGET_PC
+    if (prevState != 0) {
+        BattleACDispParams* d = ST_DISP(ac);
+        switch (ac->acState) {
+            case 99:
+            case 100:
+            case 1000:
+            case 1001:
+            case 1002:
+                BattleAcStepSlideIn(d, -200.0f, 30.0f);
+                if (ac->acState >= 100) {
+                    cw->angle += 2.0f;
+                }
+                break;
+            case 1003:
+            case 1004:
+                BattleAcStepSlideOut(d, 30.0f, -200.0f);
+                break;
+        }
+    }
+    }
+#endif
     return 1;
 }
 
@@ -245,23 +271,31 @@ void battleAcDisp_ShotTarget(CameraId cameraId, void* param) {
         case 1000:
         case 1001:
         case 1002:
+#ifndef TARGET_PC
             d->iconX = intplGetValue(4, -200.0f, 30.0f, 20 - d->slideTimer, 20);
+#endif
             actionCommandDisp(d->iconX, d->iconY);
+#ifndef TARGET_PC
             if (d->slideTimer > 0) {
                 d->slideTimer--;
             }
+#endif
             break;
         case 1003:
         case 1004:
+#ifndef TARGET_PC
             if (d->slideTimer >= 40) {
                 d->iconX = intplGetValue(4, 30.0f, -200.0f, d->slideTimer - 40, 20);
             } else {
                 d->iconX = 30.0f;
             }
+#endif
             actionCommandDisp(d->iconX, d->iconY);
+#ifndef TARGET_PC
             if (d->slideTimer < 60) {
                 d->slideTimer++;
             }
+#endif
             break;
     }
 }
@@ -302,7 +336,9 @@ static void actionCommandDisp(f32 x, f32 y) {
         case 1000:
         case 1001:
         case 1002:
+#ifndef TARGET_PC
             cw->angle += 2.0f;
+#endif
             btlGetScreenPoint(&cw->pos, &screen);
             btlDispTex4(BTL_TEX(0x42), screen, (Vec){1.0f, 1.0f, 1.0f}, (Vec){0.0f, 0.0f, 0.0f}, (GXColor){255, 255, 255, 255});
             screen.x += 4.0f;

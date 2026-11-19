@@ -2557,6 +2557,9 @@ static USER_FUNC(mono_capture_event) {
     unit = BattleGetUnitPtr(_battleWorkPointer, id);
     BtlUnit_GetPartsPtr(unit, 1);
     dispEntry(CAMERA_2D, 910.0f, 0, (DispCallback)mono_capture, unit);
+#ifdef TARGET_PC
+    portDispForceDrawThisFrame();
+#endif
     return EVT_RETURN_DONE;
 }
 

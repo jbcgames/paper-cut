@@ -863,7 +863,7 @@ static void effThunderDisp(CameraId cameraId, EffectEntry* effect) {
     PSMTXConcat(scale, mtx, mtx);
     GXLoadTexMtxImm(mtx, 33, 1);
     GXSetCullMode(0);
-    effSetVtxDescN64(Ncube_inazuma_v);
+    effSetVtxDescN64Sized(Ncube_inazuma_v, (u32)(sizeof(Ncube_inazuma_v) / sizeof(effN64Vtx)));
     switch (type) {
         case 0:
             GXBegin(144, 0, 156);

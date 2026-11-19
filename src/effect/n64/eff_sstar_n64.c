@@ -221,6 +221,23 @@ static void effSstarMain(EffectEntry* effect) {
     if (w->life < 0) {
         effDelete(effect);
     } else {
+#ifdef TARGET_PC
+        w->idx++;
+        if (w->idx >= 8) {
+            w->idx = 0;
+        }
+        if (w->bounce <= 1.0f) {
+            Mtx mtx, rot, sc;
+            f32 scale = w->scale;
+            PSMTXTrans(mtx, w->position.x, w->position.y, w->position.z);
+            PSMTXRotRad(rot, 'y', 0.017453292f * -camGetPtr(CAMERA_3D)->viewYaw);
+            PSMTXConcat(mtx, rot, mtx);
+            PSMTXScale(sc, scale, scale, scale);
+            PSMTXConcat(mtx, sc, mtx);
+            PSMTXRotRad(rot, 'z', 0.017453292f * w->rotZ);
+            PSMTXConcat(mtx, rot, w->mtx[w->idx]);
+        }
+#endif
         dispEntry(CAMERA_3D, dispCalcZ(&pos), 2, (DispCallback)effSstarDisp, effect);
     }
 }
@@ -319,12 +336,15 @@ static void effSstarDisp(CameraId cameraId, EffectEntry* effect) {
         effGetTexObjN64(0xA, &tex);
         GXLoadTexObj(&tex, GX_TEXMAP0);
     }
+#ifndef TARGET_PC
     w->idx++;
     if (w->idx >= 8) {
         w->idx = 0;
     }
+#endif
     if (w->bounce <= 1.0f) {
         k = w->idx + 5;
+#ifndef TARGET_PC
         PSMTXTrans(mtx, w->position.x, w->position.y, w->position.z);
         PSMTXRotRad(rot, 'y', 0.017453292f * -camGetPtr(cameraId)->viewYaw);
         PSMTXConcat(mtx, rot, mtx);
@@ -332,6 +352,7 @@ static void effSstarDisp(CameraId cameraId, EffectEntry* effect) {
         PSMTXConcat(mtx, sc, mtx);
         PSMTXRotRad(rot, 'z', 0.017453292f * w->rotZ);
         PSMTXConcat(mtx, rot, w->mtx[w->idx]);
+#endif
         for (i = 0; i < 5; i++) {
             memcpy(&w->vtx[i * 2], &shooting_dust_vtx[i * 2], sizeof(effN64Vtx));
             OSInitFastCast();
@@ -356,7 +377,7 @@ static void effSstarDisp(CameraId cameraId, EffectEntry* effect) {
         }
         GXInvalidateVtxCache();
         DCFlushRange(w->vtx, 0x8C);
-        effSetVtxDescN64(w->vtx);
+        effSetVtxDescN64Sized(w->vtx, 10u);
         GXLoadPosMtxImm(camera->view, GX_PNMTX0);
         for (c1 = 0; c1 < 4; c1++) {
             k = c1 * 2;
